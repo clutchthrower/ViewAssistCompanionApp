@@ -433,7 +433,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun runUpdateRoutine() {
-        if (config.hasWriteExternalStoragePermission && updateProcessComplete) {
+        if (permissions.hasPermission(permission.WRITE_EXTERNAL_STORAGE) && updateProcessComplete) {
             updateProcessComplete = false
             setStatus(getString(R.string.status_checking_for_update))
             lifecycleScope.launch {
@@ -895,24 +895,35 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     private fun checkForUpdate() {
-        Looper.prepare()
-        if (updater.isUpdateAvailable(config.minRequiredApkVersion)) {
-            log.d("Update available - ${updater.latestRelease.downloadURL}")
+        try {
+            Timber.d("Checking for update")
+            if (updater.isUpdateAvailable(config.minRequiredApkVersion)) {
+                log.d("Update available - ${updater.latestRelease.downloadURL}")
 
-            val a = VADialog(
-                title = "Update Required",
-                message = "You require a minimum of v${config.minRequiredApkVersion} of this app to connect to your server.  Do you wish to download and install this version now?",
-                confirmCallback = {
-                    downloadAndInstallUpdate()
-                },
-                dismissCallback = {
-                    updateProcessComplete = true
-                    viewModel.vacaState.value.updates.updateAvailable = true
-                    setStatus(getString(R.string.status_app_update_required, config.minRequiredApkVersion))
-                }
-            )
-            viewModel.showUpdateDialog(a)
-        } else {
+                val a = VADialog(
+                    title = "Update Required",
+                    message = "You require a minimum of v${config.minRequiredApkVersion} of this app to connect to your server.  Do you wish to download and install this version now?",
+                    confirmCallback = {
+                        downloadAndInstallUpdate()
+                    },
+                    dismissCallback = {
+                        updateProcessComplete = true
+                        viewModel.vacaState.value.updates.updateAvailable = true
+                        setStatus(
+                            getString(
+                                R.string.status_app_update_required,
+                                config.minRequiredApkVersion
+                            )
+                        )
+                    }
+                )
+                viewModel.showUpdateDialog(a)
+            } else {
+                updateProcessComplete = true
+                setStatus("Incompatible version. In app update not available")
+            }
+        } catch (ex: Exception) {
+            Timber.e("Error checking for update - ${ex.message}")
             updateProcessComplete = true
             setStatus("Incompatible version. In app update not available")
         }
