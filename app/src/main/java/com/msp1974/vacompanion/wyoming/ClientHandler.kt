@@ -17,6 +17,7 @@ import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.ScreenUtils
 import com.msp1974.vacompanion.utils.WakeWords
+import com.msp1974.vacompanion.wakeword.microwakeword.providers.AssetWakeWordProvider
 import io.github.z4kn4fein.semver.toVersion
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonElement
@@ -342,7 +343,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                     }
 
                     "error" -> {
-                        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", ""))
+                        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
                         resetPipeline()
                     }
 
@@ -562,7 +563,8 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
     @OptIn(ExperimentalSerializationApi::class)
     fun sendInfo() {
-        val wakeWords = WakeWords(context).getWakeWords()
+        val owwWakeWords = WakeWords(context).getWakeWords()
+        val mwwWakeWords = listOf("alexa","hey_home_assistant","hey_jarvis","hey_luna","hey_mycroft","okay_computer","okay_nabu")
         sendEvent(
             "info",
             buildJsonObject {
@@ -581,11 +583,11 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             }
                             put("installed", true)
                             putJsonArray("models") {
-                                addAll(wakeWords.map {
+                                addAll(owwWakeWords.map {
                                     buildJsonObject {
                                         put("name", it.key)
                                         putJsonObject("attribution") {
-                                            put("name", "")
+                                            put("name", "openwakeword")
                                             put("url", "")
                                         }
                                         put("installed", true)
@@ -593,6 +595,20 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                                             addAll(listOf("en"))
                                         }
                                         put("phrase", it.value.name)
+                                    }
+                                })
+                                addAll(mwwWakeWords.map {
+                                    buildJsonObject {
+                                        put("name", it)
+                                        putJsonObject("attribution") {
+                                            put("name", "microwakeword")
+                                            put("url", "")
+                                        }
+                                        put("installed", true)
+                                        putJsonArray("languages") {
+                                            addAll(listOf("en"))
+                                        }
+                                        put("phrase", it.replace("_", " "))
                                     }
                                 })
                             }

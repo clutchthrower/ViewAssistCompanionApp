@@ -20,14 +20,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.StrictMode
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -81,7 +78,6 @@ import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import kotlin.concurrent.thread
 import kotlin.getValue
 
 

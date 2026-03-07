@@ -99,8 +99,12 @@ class DeviceCapabilitiesManager(val context: Context) {
     }
 
     fun getWebViewVersion(): String {
-        val info = WebView.getCurrentWebViewPackage()
-        return info!!.versionName!!
+        try {
+            val info = WebView.getCurrentWebViewPackage()
+            return info!!.versionName!!
+        } catch (e: Exception) {
+            return "unknown"
+        }
     }
 
     fun hasBattery(): Boolean {

@@ -12,6 +12,7 @@ import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.Permissions
+import com.msp1974.vacompanion.wakeword.WakeWordEngineModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -305,6 +306,7 @@ data class PermissionsStatus(
 
 data class DiagnosticInfo(
     var show: Boolean = false,
+    var engine: String = "",
     var audioLevel: Float = 0f,
     var detectionThreshold: Float = 0f,
     var detectionLevel: Float = 0f,
