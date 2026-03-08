@@ -59,6 +59,7 @@ import com.msp1974.vacompanion.ui.layouts.ConnectionScreen
 import com.msp1974.vacompanion.ui.layouts.WebViewScreen
 import com.msp1974.vacompanion.ui.theme.AppTheme
 import com.msp1974.vacompanion.utils.AuthUtils
+import com.msp1974.vacompanion.utils.CustomWebChromeClient
 import com.msp1974.vacompanion.utils.CustomWebView
 import com.msp1974.vacompanion.utils.CustomWebViewClient
 import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
@@ -253,6 +254,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     fun initWebView() {
         webViewClient = CustomWebViewClient(viewModel)
         webView = CustomWebView.getView(this)
+        webView.webChromeClient = CustomWebChromeClient(this@MainActivity)
         webView.initialise(config, webViewClient)
         webView.layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
