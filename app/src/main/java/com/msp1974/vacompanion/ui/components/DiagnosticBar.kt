@@ -59,7 +59,7 @@ fun DiagnosticBar(
                     indicatorValue = (diagnosticInfo.detectionLevel).toInt(),
                     maxIndicatorValue = 10,
                     smallText = "Detection",
-                    foregroundIndicatorColor = if (diagnosticInfo.detectionLevel > diagnosticInfo.detectionThreshold) CustomColours.GREEN else CustomColours.AMBER
+                    foregroundIndicatorColor = if (diagnosticInfo.detectionLevel >= diagnosticInfo.detectionThreshold) CustomColours.GREEN else CustomColours.AMBER
                 )
             }
             Column() {
