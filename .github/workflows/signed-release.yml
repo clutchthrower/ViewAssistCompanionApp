@@ -1,0 +1,129 @@
+name: Build, Signed, Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Calculate new version
+        id: calc_version
+        run: |
+          CURRENT_VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)"/\1/')
+          echo "Current version: $CURRENT_VERSION"
+
+          IFS='.' read -r -a version_parts <<< "$CURRENT_VERSION"
+          MAJOR="${version_parts[0]}"
+          MINOR="${version_parts[1]}"
+          PATCH="${version_parts[2]}"
+
+          if [ "${{ inputs.version_bump }}" == "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "${{ inputs.version_bump }}" == "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Increment version code
+        id: inc_version_code
+        run: |
+          CURRENT_VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed 's/.*versionCode = \([0-9]*\)/\1/')
+          NEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
+          echo "version_code=$NEW_VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Previous version code: $CURRENT_VERSION_CODE"
+          echo "New version code: $NEW_VERSION_CODE"
+
+      - name: Update build.gradle.kts with new version
+        run: |
+          sed -i "s/versionCode = [0-9]*/versionCode = ${{ steps.inc_version_code.outputs.version_code }}/" app/build.gradle.kts
+          sed -i "s/versionName = \".*\"/versionName = \"${{ steps.calc_version.outputs.new_version }}\"/" app/build.gradle.kts
+          echo "Updated build.gradle.kts:"
+          cat app/build.gradle.kts | grep -A 2 "versionCode"
+
+      - name: Commit version bump and create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: bump version to ${{ steps.calc_version.outputs.new_version }} (versionCode ${{ steps.inc_version_code.outputs.version_code }})"
+          git tag -a ${{ steps.calc_version.outputs.tag }} -m "Release ${{ steps.calc_version.outputs.tag }}"
+          git push origin main
+          git push origin ${{ steps.calc_version.outputs.tag }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Create Google Services JSON File
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: echo $GOOGLE_SERVICES_JSON > ./app/google-services.json
+
+      - name: Decode Keystore
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+        run: echo $KEYSTORE_FILE | base64 -di > ./app/release.keystore
+
+      - name: Build Signed Release APK and AAB
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/app/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease bundleRelease
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.calc_version.outputs.tag }}
+          name: Release ${{ steps.calc_version.outputs.tag }}
+          files: |
+            app/build/outputs/apk/release/vaca-*.apk
+            app/build/outputs/bundle/release/*.aab
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: codes.andrew.vacompanion
+          releaseFiles: app/build/outputs/bundle/release/*.aab
+          track: internal
+          releaseName: ${{ steps.calc_version.outputs.tag }}
+          status: completed
+          inAppUpdatePriority: 2

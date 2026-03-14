@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.AudioManager
@@ -20,14 +21,10 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.StrictMode
 import android.provider.Settings
-import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -81,7 +78,6 @@ import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import kotlin.concurrent.thread
 import kotlin.getValue
 
 
@@ -126,8 +122,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         enableEdgeToEdge()
 
         splashscreen.setKeepOnScreenCondition { keepSplashScreen }
-
-        screenOrientation = resources.configuration.orientation
 
         onBackPressedDispatcher.addCallback(this, onBackButton)
         setFirebaseUserProperties()
@@ -433,7 +427,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun runUpdateRoutine() {
-        if (config.hasWriteExternalStoragePermission && updateProcessComplete) {
+        if (permissions.hasPermission(permission.WRITE_EXTERNAL_STORAGE) && updateProcessComplete) {
             updateProcessComplete = false
             setStatus(getString(R.string.status_checking_for_update))
             lifecycleScope.launch {
@@ -455,6 +449,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     override fun onResume() {
         super.onResume()
         log.d("Main Activity resumed")
+
         // Catch if background tasks not running
         if (initialised && Helpers.isNetworkAvailable(this) && config.backgroundTaskStatus == BackgroundTaskStatus.NOT_STARTED ) {
             log.e("Background task starting on resume as is is not running")
@@ -472,11 +467,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(satelliteBroadcastReceiver)
         unregisterReceiver(satelliteBroadcastReceiver)
         super.onDestroy()
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        Timber.i("Key pressed -> $keyCode")
-        return super.onKeyDown(keyCode, event)
     }
 
     private suspend fun runBackgroundTasks() {
@@ -565,6 +555,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
+                "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()
                 "proximity" -> if (config.screenOnProximity && event.newValue as Float == 0f) screenWake()
                 "motion" -> onMotion()
@@ -584,6 +575,16 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     fun onMotion() {
         config.lastMotion = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
         if (config.screenOnMotion) screenWake()
+    }
+
+    fun setScreenOrientation(mode: String) {
+        when (mode) {
+            "auto" ->  setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+            "portrait" -> setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
+            "landscape" -> setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+            "reverse_portrait" -> setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT)
+            "reverse_landscape" -> setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)
+        }
     }
 
     fun screenSaver(active: Boolean) {
@@ -895,24 +896,35 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     private fun checkForUpdate() {
-        Looper.prepare()
-        if (updater.isUpdateAvailable(config.minRequiredApkVersion)) {
-            log.d("Update available - ${updater.latestRelease.downloadURL}")
+        try {
+            Timber.d("Checking for update")
+            if (updater.isUpdateAvailable(config.minRequiredApkVersion)) {
+                log.d("Update available - ${updater.latestRelease.downloadURL}")
 
-            val a = VADialog(
-                title = "Update Required",
-                message = "You require a minimum of v${config.minRequiredApkVersion} of this app to connect to your server.  Do you wish to download and install this version now?",
-                confirmCallback = {
-                    downloadAndInstallUpdate()
-                },
-                dismissCallback = {
-                    updateProcessComplete = true
-                    viewModel.vacaState.value.updates.updateAvailable = true
-                    setStatus(getString(R.string.status_app_update_required, config.minRequiredApkVersion))
-                }
-            )
-            viewModel.showUpdateDialog(a)
-        } else {
+                val a = VADialog(
+                    title = "Update Required",
+                    message = "You require a minimum of v${config.minRequiredApkVersion} of this app to connect to your server.  Do you wish to download and install this version now?",
+                    confirmCallback = {
+                        downloadAndInstallUpdate()
+                    },
+                    dismissCallback = {
+                        updateProcessComplete = true
+                        viewModel.vacaState.value.updates.updateAvailable = true
+                        setStatus(
+                            getString(
+                                R.string.status_app_update_required,
+                                config.minRequiredApkVersion
+                            )
+                        )
+                    }
+                )
+                viewModel.showUpdateDialog(a)
+            } else {
+                updateProcessComplete = true
+                setStatus("Incompatible version. In app update not available")
+            }
+        } catch (ex: Exception) {
+            Timber.e("Error checking for update - ${ex.message}")
             updateProcessComplete = true
             setStatus("Incompatible version. In app update not available")
         }

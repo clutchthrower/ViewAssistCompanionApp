@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import timber.log.Timber
 import java.io.File
 
 data class LatestRelease(
@@ -58,6 +59,7 @@ class Updater(val activity: Activity) {
             latestRelease.version =
                 data.getOrDefault("name", "0.0.0").toString().replace("v", "").replace("\"", "")
             latestRelease.downloadURL = getDownloadLink(data)
+            Timber.d("Latest release: ${latestRelease.version} -> ${latestRelease.downloadURL}")
         }
         return latestRelease
     }
@@ -72,16 +74,24 @@ class Updater(val activity: Activity) {
 
     fun isUpdateAvailable(version: String = ""): Boolean {
         var release: LatestRelease
-        if (version != "") {
-          release = getVersionRelease(version)
-        } else {
-          release = getLatestRelease()
+        try {
+            if (version != "") {
+                release = getVersionRelease(version)
+            } else {
+                release = getLatestRelease()
+            }
+            if (release.version != "0.0.0") {
+                val installed = activity.packageManager.getPackageInfo(
+                    activity.packageName,
+                    0
+                ).versionName.toString()
+                return release.version.toVersion() > installed.toVersion()
+            }
+            return false
+        } catch (e: Exception) {
+            Timber.e(e.message.toString())
+            return false
         }
-        if (release.version != "0.0.0") {
-            val installed =  activity.packageManager.getPackageInfo(activity.packageName, 0).versionName.toString()
-            return release.version.toVersion() > installed.toVersion()
-        }
-        return false
     }
 
     fun requestDownload(callback: (uri: String) -> Unit) {
