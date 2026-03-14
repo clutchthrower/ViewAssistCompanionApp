@@ -49,7 +49,7 @@ jobs:
 
       # Set version name as env variable
       - name: Set version name as env variable
-        run: echo "version_name=$(./gradlew -q printVersionName)" >> $GITHUB_ENV
+        run: echo "version_name=$(echo $(./gradlew -q printVersionName))" >> $GITHUB_ENV
 
       # Run Tests Build
       - name: Run gradle tests
