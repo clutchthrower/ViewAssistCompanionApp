@@ -160,7 +160,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
             }
             "notificationVolume" -> {
-                setVolume(AudioManager.STREAM_NOTIFICATION, event.newValue as Int)
+                if (!DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)) {
+                    setVolume(AudioManager.STREAM_NOTIFICATION, event.newValue as Int)
+                }
             }
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
