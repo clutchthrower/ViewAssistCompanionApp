@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Context.NOTIFICATION_SERVICE
 import android.content.res.AssetManager
 import android.media.AudioManager
+import android.net.wifi.WifiManager
 import androidx.annotation.RequiresPermission
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.wyoming.Zeroconf
@@ -54,6 +55,8 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private var holdDetectionLevelJob: Job? = null
     private var lastWakeWordDetectionScore = 0f
 
+    private var wifiLock: WifiManager.WifiLock? = null
+
     private val detectionCooldowns = mutableMapOf<String, Long>()
     private val detectionCooldownMs: Long = 2000L
 
@@ -72,11 +75,16 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     fun start() {
         assetManager = context.assets
 
+        // wifi lock
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL, "wallPanel:wifiLock")
+
         volumeObserver = VolumeObserver(context) { musicVolume, notificationVolume ->
             if (config.musicVolume != musicVolume) {
                 config.musicVolume = musicVolume
                 server.sendSetting("music_volume", musicVolume)
             }
+
             if (config.notificationVolume != notificationVolume) {
                 config.notificationVolume = notificationVolume
                 server.sendSetting("notification_volume", notificationVolume)
@@ -486,6 +494,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     fun shutdown() {
         Timber.i("Shutting down")
+        if (wifiLock != null && wifiLock!!.isHeld) {
+            wifiLock!!.release()
+        }
         config.eventBroadcaster.removeListener(this)
         zeroConf.unregisterService()
         motionTask.stopCamera()
