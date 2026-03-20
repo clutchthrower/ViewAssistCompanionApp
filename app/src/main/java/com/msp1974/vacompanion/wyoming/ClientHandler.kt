@@ -65,6 +65,22 @@ class ClientHandler(
         Thread(runnable, "WyomingSender-$clientId")
     }
 
+    /**
+     * After we interrupt an in-flight pipeline, Home Assistant still applies
+     * `WAKE_WORD_COOLDOWN` (2s) per wake phrase for satellite STT. A second `detection` +
+     * `run-pipeline` right away triggers "Speech-to-text cancelled to avoid duplicate wake-up".
+     * We wait for `pipeline-ended`, then send `run-pipeline` only (no `detection`) so
+     * `wake_word_phrase` is null and that guard is skipped.
+     */
+    @Volatile
+    private var awaitingPipelineEndForWakeRestart = false
+    private val deferredWakeRestartTimeoutRunnable = Runnable {
+        if (!awaitingPipelineEndForWakeRestart) return@Runnable
+        awaitingPipelineEndForWakeRestart = false
+        log.d("Timeout waiting for pipeline-ended after wake interrupt; run-pipeline without detection")
+        sendStartPipeline(precedeWithWakeDetection = false)
+    }
+
     private class PipelineSession(val id: Int) {
         @Volatile var logicFinished = false
         @Volatile var audioFinished = false
@@ -149,6 +165,8 @@ class ClientHandler(
             stopSatelliteInternal()
         }
 
+        cancelDeferredWakeRestart()
+
 
         
         mediaManager.release()
@@ -168,13 +186,32 @@ class ClientHandler(
 
     private fun handleWakeWordDetected() {
         if (pipelineStatus != PipelineStatus.INACTIVE || isPipelineActive()) {
-            log.d("Ignoring wake word detection - pipeline already active ($pipelineStatus)")
-            return
+            if (pipelineStatus == PipelineStatus.STREAMING || pipelineStatus == PipelineStatus.AWAITING_TTS) {
+                log.d("Interrupting response ($pipelineStatus) for new wake word")
+                resetPipeline()
+                scheduleDeferredWakeRestartAfterInterrupt()
+                return
+            } else {
+                log.d("Ignoring redundant wake word detection ($pipelineStatus)")
+                return
+            }
         }
 
-        log.d("Wake word detected. Current status: $pipelineStatus, active: ${isPipelineActive()}")
+        cancelDeferredWakeRestart()
+        log.d("Wake word detected. Starting pipeline.")
         mediaManager.updateVolumeDucking("all", true)
         sendStartPipeline(precedeWithWakeDetection = true)
+    }
+
+    private fun cancelDeferredWakeRestart() {
+        awaitingPipelineEndForWakeRestart = false
+        handler.removeCallbacks(deferredWakeRestartTimeoutRunnable)
+    }
+
+    private fun scheduleDeferredWakeRestartAfterInterrupt() {
+        cancelDeferredWakeRestart()
+        awaitingPipelineEndForWakeRestart = true
+        handler.postDelayed(deferredWakeRestartTimeoutRunnable, 2_800L)
     }
 
 
@@ -347,6 +384,14 @@ class ClientHandler(
     }
 
     private fun handlePipelineEnded() {
+        if (awaitingPipelineEndForWakeRestart) {
+            handler.removeCallbacks(deferredWakeRestartTimeoutRunnable)
+            awaitingPipelineEndForWakeRestart = false
+            log.d("pipeline-ended after wake interrupt; run-pipeline without detection (avoids HA duplicate-wake STT cancel)")
+            sendStartPipeline(precedeWithWakeDetection = false)
+            return
+        }
+
         val session = currentSession ?: return
         session.logicFinished = true
 
@@ -442,7 +487,8 @@ class ClientHandler(
     }
 
     private fun resetPipeline() {
-
+        // this must not be here or it will cancel when HA sends pipeline-ended after wake interrupt
+        // cancelDeferredWakeRestart()
         val wasListening = pipelineStatus == PipelineStatus.LISTENING
         val sessionIdForAudioStop = currentSession?.id
         activePipelines.set(0)
