@@ -67,6 +67,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
     private var expectingTTSResponse: Boolean = false
     private var lastResponseIsQuestion: Boolean = false
+    private var activePipelines: Int = 0
 
     // Initiate wake word broadcast receiver
     var wakeWordBroadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -285,71 +286,97 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "transcript" -> {
                         // Sent when STT converted voice command to text
-                        releaseInputAudioStream()
-                        if (event.getProp("text").lowercase().contains("never mind")) {
-                            volumeDucking("all", false)
+                        if (activePipelines > 1) {
+                            log.d("Ignoring transcript event for old pipeline (active=$activePipelines)")
                         } else {
-                            // If no response from conversation engine in 10s, timeout
-                            setPipelineNextStageTimeout(10)
+                            releaseInputAudioStream()
+                            if (event.getProp("text").lowercase().contains("never mind")) {
+                                volumeDucking("all", false)
+                            } else {
+                                // If no response from conversation engine in 10s, timeout
+                                setPipelineNextStageTimeout(10)
+                            }
                         }
                     }
 
                     "synthesize" -> {
                         // Sent when conversation engine sent response to command
-                        lastResponseIsQuestion =
-                            (event.getProp("text").replace("\n", "").endsWith("?"))
-                        expectingTTSResponse = true
-                        setPipelineNextStageTimeout(10)
+                        if (activePipelines > 1) {
+                            log.d("Ignoring synthesize event for old pipeline (active=$activePipelines)")
+                        } else {
+                            lastResponseIsQuestion =
+                                (event.getProp("text").replace("\n", "").endsWith("?"))
+                            expectingTTSResponse = true
+                            setPipelineNextStageTimeout(10)
+                        }
                     }
 
                     "pipeline-ended" -> {
                         // Sent when pipeline has finished
-                        if (!expectingTTSResponse) {
-                            cancelPipelineNextStageTimeout()
-                            volumeDucking("all", false)
-                        }
-                        if (pipelineStatus != PipelineStatus.STREAMING) {
-                            releaseInputAudioStream()
+                        if (activePipelines > 0) activePipelines--
+                        if (activePipelines > 0) {
+                            log.d("Ignoring pipeline-ended event for old pipeline (active=$activePipelines)")
+                        } else {
+                            if (!expectingTTSResponse) {
+                                cancelPipelineNextStageTimeout()
+                                volumeDucking("all", false)
+                            }
+                            if (pipelineStatus != PipelineStatus.STREAMING) {
+                                releaseInputAudioStream()
+                            }
                         }
                     }
 
                     "audio-start" -> {
                         // Sent when audio stream about to start
-                        expectingTTSResponse = false  // This is it so reset expecting
-                        cancelPipelineNextStageTimeout() // Playing audio, cancel any timeout
-                        pipelineStatus = PipelineStatus.STREAMING
-                        volumeDucking("all", true)  // Duck here if announcement
-                        pcmMediaPlayer.play()
+                        if (activePipelines > 1) {
+                            log.d("Ignoring audio-start event for old pipeline (active=$activePipelines)")
+                        } else {
+                            expectingTTSResponse = false  // This is it so reset expecting
+                            cancelPipelineNextStageTimeout() // Playing audio, cancel any timeout
+                            pipelineStatus = PipelineStatus.STREAMING
+                            volumeDucking("all", true)  // Duck here if announcement
+                            pcmMediaPlayer.play()
+                        }
                     }
 
                     "audio-chunk" -> {
                         // Audio chunk
-                        if (pcmMediaPlayer.isPlaying) {
+                        if (activePipelines <= 1 && pcmMediaPlayer.isPlaying) {
                             pcmMediaPlayer.writeAudio(event.payload)
                         }
                     }
 
                     "audio-stop" -> {
                         // Sent when all audio chunks sent
-                        if (pcmMediaPlayer.isPlaying) {
-                            pcmMediaPlayer.stop()
-                        }
-                        pipelineStatus = PipelineStatus.INACTIVE
-                        sendEvent(
-                            "played",
-                        )
-
-                        if (config.continueConversation || lastResponseIsQuestion) {
-                            sendStartPipeline()
+                        if (activePipelines > 1) {
+                            log.d("Ignoring audio-stop event for old pipeline (active=$activePipelines)")
                         } else {
-                            setPipelineNextStageTimeout(2)
+                            if (pcmMediaPlayer.isPlaying) {
+                                pcmMediaPlayer.stop()
+                            }
+                            pipelineStatus = PipelineStatus.INACTIVE
+                            sendEvent(
+                                "played",
+                            )
+
+                            if (config.continueConversation || lastResponseIsQuestion) {
+                                sendStartPipeline()
+                            } else {
+                                setPipelineNextStageTimeout(2)
+                            }
                         }
 
                     }
 
                     "error" -> {
-                        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
-                        resetPipeline()
+                        if (activePipelines > 0) activePipelines--
+                        if (activePipelines > 0) {
+                            log.d("Ignoring error event for old pipeline (active=$activePipelines)")
+                        } else {
+                            config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
+                            resetPipeline()
+                        }
                     }
 
                     "custom-action" -> {
@@ -386,6 +413,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     }
 
     private fun resetPipeline() {
+        activePipelines = 0
         expectingTTSResponse = false
 
         volumeDucking("all", false)
@@ -648,6 +676,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     }
 
     fun sendStartPipeline() {
+        activePipelines++
         sendEvent(
             "run-pipeline",
             buildJsonObject {
@@ -663,6 +692,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
             }
         )
         lastResponseIsQuestion = false
+        setPipelineNextStageTimeout(10)
     }
 
     fun sendAudioStop() {
