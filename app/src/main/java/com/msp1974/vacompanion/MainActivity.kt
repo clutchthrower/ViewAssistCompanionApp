@@ -632,17 +632,21 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         screen.wakeScreen()
 
-        if (viewModel.vacaState.value.screenBlank && initialised) {
+        screenOffInProgress = false
+        if (initialised) {
             setScreenSaver(false)
         }
     }
 
     fun screenSleep() {
+        if (screen.isScreenOff()) {
+            Timber.d("Screen already off, ignoring sleep request")
+            return
+        }
         Timber.d("Sleeping screen")
         if (permissions.isDeviceAdmin()) {
             screen.setPartialWakeLock()
             lockScreen()
-            setScreenSaver(false)
             return
         }
 
@@ -684,7 +688,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
         config.screenOn = false
         screenOffInProgress = false
-        setScreenSaver(false)
         log.d("Screen off")
     }
 

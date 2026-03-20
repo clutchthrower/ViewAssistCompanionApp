@@ -2,10 +2,11 @@ package com.msp1974.vacompanion.wyoming
 
 import kotlinx.serialization.json.*
 
-class WyomingPacket (
+data class WyomingPacket (
     val type: String,
     val data: JsonObject = buildJsonObject {},
-    var payload: ByteArray = ByteArray(0)
+    var payload: ByteArray = ByteArray(0),
+    val sessionId: Int? = null
 ) {
     fun getProp(prop: String): String {
         // TODO: Implement a more robust parsing mechanism for complex JSON properties.

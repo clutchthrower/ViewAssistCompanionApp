@@ -16,7 +16,17 @@ class WyomingMessenger(
     private val json = Json { ignoreUnknownKeys = true }
 
     @Synchronized
-    fun sendEvent(packet: WyomingPacket, pipelineStatus: PipelineStatus) {
+    fun sendEvent(packet: WyomingPacket, pipelineStatus: PipelineStatus, currentSessionId: Int? = null) {
+        // Drop only when there is an *active* session and the packet belongs to an older one.
+        // If currentSessionId is null (e.g. pipeline torn down), still send tagged cleanup (audio-stop, etc.).
+        if (currentSessionId != null &&
+            packet.sessionId != null &&
+            packet.sessionId != currentSessionId
+        ) {
+            log.d("Dropping packet ${packet.type} for session ${packet.sessionId} (current session: $currentSessionId)")
+            return
+        }
+        
         if (packet.type == "audio-chunk" && pipelineStatus != PipelineStatus.LISTENING) {
             return
         }

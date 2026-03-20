@@ -148,6 +148,8 @@ class ClientHandler(
         if (satelliteStatus == SatelliteState.RUNNING) {
             stopSatelliteInternal()
         }
+
+
         
         mediaManager.release()
         runCatching { client.close() }
@@ -165,18 +167,17 @@ class ClientHandler(
     }
 
     private fun handleWakeWordDetected() {
+        if (pipelineStatus != PipelineStatus.INACTIVE || isPipelineActive()) {
+            log.d("Ignoring wake word detection - pipeline already active ($pipelineStatus)")
+            return
+        }
+
         log.d("Wake word detected. Current status: $pipelineStatus, active: ${isPipelineActive()}")
         mediaManager.updateVolumeDucking("all", true)
-        
-        if (pipelineStatus != PipelineStatus.INACTIVE || isPipelineActive()) {
-            log.d("Interrupting current pipeline status $pipelineStatus for new wake word")
-            resetPipeline()
-        }
-        
-        mediaManager.updateVolumeDucking("all", true)
-        sendWakeWordDetection()
-        sendStartPipeline()
+        sendStartPipeline(precedeWithWakeDetection = true)
     }
+
+
 
     private fun startSatellite() {
         val currentVer = config.version.toVersion()
@@ -296,6 +297,10 @@ class ClientHandler(
         when (event.type) {
             "pause-satellite" -> stopSatellite()
             "transcribe" -> {
+                if (currentSession == null) {
+                    log.d("Ignoring transcribe — no pipeline session (stale or very early)")
+                    return
+                }
                 mediaManager.updateVolumeDucking("all", true)
                 requestInputAudioStream()
                 setPipelineTimeout(10)
@@ -343,7 +348,6 @@ class ClientHandler(
 
     private fun handlePipelineEnded() {
         val session = currentSession ?: return
-
         session.logicFinished = true
 
         if (pipelineStatus == PipelineStatus.AWAITING_TTS || pipelineStatus == PipelineStatus.STREAMING) {
@@ -438,7 +442,9 @@ class ClientHandler(
     }
 
     private fun resetPipeline() {
+
         val wasListening = pipelineStatus == PipelineStatus.LISTENING
+        val sessionIdForAudioStop = currentSession?.id
         activePipelines.set(0)
         currentSession = null
         receivedSynthesize = false
@@ -450,7 +456,7 @@ class ClientHandler(
         }
         
         if (wasListening) {
-            sendAudioStop()
+            sendAudioStop(sessionIdForAudioStop)
         }
         
         pipelineStatus = PipelineStatus.INACTIVE
@@ -541,32 +547,60 @@ class ClientHandler(
         })
     }
 
-    fun sendStartPipeline() {
+    /**
+     * Starts a pipeline run. When [precedeWithWakeDetection] is true, sends `detection` and `run-pipeline` back-to-back
+     * in one [sendExecutor] task so no other outbound event (e.g. ping) is interleaved between them on the wire.
+     */
+    fun sendStartPipeline(precedeWithWakeDetection: Boolean = false) {
         if (pipelineStatus == PipelineStatus.LISTENING) {
             releaseInputAudioStream()
         }
         val nextId = activePipelines.incrementAndGet()
-        currentSession = PipelineSession(nextId)
-        
-        sendEvent("run-pipeline", buildJsonObject {
-            put("name", "VACA ${config.uuid}")
-            put("start_stage", "asr")
-            put("end_stage", "tts")
-            put("restart_on_end", false)
-            putJsonObject("snd_format") {
-                put("rate", config.sampleRate)
-                put("width", config.audioWidth)
-                put("channels", config.audioChannels)
+
+        val runPipelinePacket = WyomingPacket(
+            "run-pipeline",
+            buildJsonObject {
+                put("name", "VACA ${config.uuid}")
+                put("start_stage", "asr")
+                put("end_stage", "tts")
+                put("restart_on_end", false)
+                putJsonObject("snd_format") {
+                    put("rate", config.sampleRate)
+                    put("width", config.audioWidth)
+                    put("channels", config.audioChannels)
+                }
             }
-        })
+        )
+
+        sendExecutor.execute {
+            if (precedeWithWakeDetection) {
+                val detectionPacket = WyomingPacket(
+                    "detection",
+                    buildJsonObject {
+                        put("name", config.wakeWord)
+                        put("timestamp", isoNow())
+                        put("speaker", "")
+                    },
+                    sessionId = nextId
+                )
+                messenger.sendEvent(detectionPacket, pipelineStatus, nextId)
+            }
+            messenger.sendEvent(runPipelinePacket.copy(sessionId = nextId), pipelineStatus, nextId)
+        }
+
+        currentSession = PipelineSession(nextId)
         receivedSynthesize = false
         setPipelineTimeout(15)
     }
 
-    fun sendAudioStop() {
-        sendEvent("audio-stop", buildJsonObject {
-            put("timestamp", isoNow())
-        })
+    /** @param sessionId session to tag the stop with; pass from before clearing [currentSession] on reset. */
+    fun sendAudioStop(sessionId: Int? = null) {
+        sendEvent(
+            "audio-stop",
+            buildJsonObject { put("timestamp", isoNow()) },
+            ByteArray(0),
+            enqueueSessionId = sessionId ?: currentSession?.id
+        )
     }
 
     fun sendAudio(audio: ByteArray) {
@@ -613,16 +647,19 @@ class ClientHandler(
         })
     }
 
-    fun sendEvent(type: String, data: JsonObject = buildJsonObject {}, payload: ByteArray = ByteArray(0)) {
+    fun sendEvent(
+        type: String,
+        data: JsonObject = buildJsonObject {},
+        payload: ByteArray = ByteArray(0),
+        enqueueSessionId: Int? = currentSession?.id
+    ) {
         if (!isRunning.get() || client.isClosed) return
-        
+
         sendExecutor.execute {
             runCatching {
-                val event = WyomingPacket(type, data, payload)
-                // We use the latest LATEST pipelineStatus here to filter out late 'audio-chunks' 
-                // if the pipeline was deactivated while they were still in the queue.
-                messenger.sendEvent(event, this.pipelineStatus)
-            }.onFailure { 
+                val event = WyomingPacket(type, data, payload, sessionId = enqueueSessionId)
+                messenger.sendEvent(event, this.pipelineStatus, currentSession?.id)
+            }.onFailure {
                 if (isRunning.get()) {
                     log.e("Failed to send event $type: ${it.message}")
                 }
