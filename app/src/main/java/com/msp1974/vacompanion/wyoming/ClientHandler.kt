@@ -63,11 +63,15 @@ class ClientHandler(
     
     private val activePipelines = AtomicInteger(0)
     private var currentSession: PipelineSession? = null
+    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "WyomingSender-$clientId")
+    }
 
     private class PipelineSession(val id: Int) {
         @Volatile var logicFinished = false
         @Volatile var audioFinished = false
         @Volatile var finalized = false
+        @Volatile var forceContinue = false
     }
 
     private fun isPipelineActive() = currentSession != null
@@ -81,19 +85,21 @@ class ClientHandler(
             if (satelliteStatus != SatelliteState.RUNNING) return
             
             broadcastExecutor.execute {
-                when {
-                    mediaManager.pcmMediaPlayer.isPlaying -> {
-                        sendAudioStop()
-                        mediaManager.pcmMediaPlayer.stop()
-                        mediaManager.updateVolumeDucking("music", false)
-                    }
-                    mediaManager.alarmPlayer.isSounding -> {
-                        handleAlarmAction(false)
-                    }
-                    intent.action == BroadcastSender.WAKE_WORD_DETECTED -> {
+                // First, handle any media/alarm stops if needed
+                if (mediaManager.pcmMediaPlayer.isPlaying) {
+                    mediaManager.pcmMediaPlayer.stop()
+                    mediaManager.updateVolumeDucking("music", false)
+                }
+                if (mediaManager.alarmPlayer.isSounding) {
+                    handleAlarmAction(false)
+                }
+
+                // Second, handle the specific intent action
+                when (intent.action) {
+                    BroadcastSender.WAKE_WORD_DETECTED -> {
                         handleWakeWordDetected()
                     }
-                    intent.action == BroadcastSender.STOP_WORD_DETECTED -> {
+                    BroadcastSender.STOP_WORD_DETECTED -> {
                         log.d("Stop word detected - resetting pipeline")
                         resetPipeline()
                     }
@@ -147,8 +153,13 @@ class ClientHandler(
         
         mediaManager.release()
         runCatching { client.close() }
+        sendExecutor.shutdown()
         broadcastExecutor.shutdown()
-        runCatching { broadcastExecutor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS) }
+        runCatching {
+            sendExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
+            broadcastExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        sendExecutor.shutdownNow()
         broadcastExecutor.shutdownNow()
 
         val remaining = config.atomicConnectionCount.decrementAndGet()
@@ -308,17 +319,26 @@ class ClientHandler(
             releaseInputAudioStream()
             if (event.getProp("text").lowercase().contains("never mind")) {
                 mediaManager.updateVolumeDucking("all", false)
+                resetPipeline()
             } else {
-                setPipelineTimeout(10)
+                setPipelineTimeout(15) // Waiting for synthesis
             }
         }
     }
 
     private fun handleSynthesize(event: WyomingPacket) {
-        if (isPipelineActive()) {
+        val session = currentSession
+        if (session != null) {
             pipelineStatus = PipelineStatus.AWAITING_TTS
             receivedSynthesize = true
-            setPipelineTimeout(10)
+            
+            // Check for continue_conversation flag in the synthesize data (HA might pass it here)
+            findContinueConversation(event.data)?.let {
+                log.d("Found continue_conversation=$it in synthesize event")
+                session.forceContinue = it
+            }
+
+            setPipelineTimeout(20)
         }
     }
 
@@ -376,8 +396,9 @@ class ClientHandler(
     private fun handleAudioStop() {
         if (isPipelineActive()) {
             if (mediaManager.pcmMediaPlayer.isPlaying) {
+                // We send 'played' but we DON'T stop immediately, to allow draining.
+                // The next synthesizer or a reset will stop it properly.
                 sendEvent("played")
-                mediaManager.pcmMediaPlayer.stop()
             }
             
             pipelineStatus = PipelineStatus.INACTIVE
@@ -386,17 +407,14 @@ class ClientHandler(
             
             if (session != null) {
                 session.audioFinished = true
+                val shouldContinue = session.forceContinue
+                
                 checkFinalizeSession(session)
-            }
-
-            if (hadSynthesize) {
-                if (config.continueConversation) {
+                
+                if (hadSynthesize && shouldContinue) {
+                    log.d("Continuing conversation as requested by Home Assistant Turn result.")
                     sendStartPipeline()
-                } else {
-                    setPipelineTimeout(2)
                 }
-            } else {
-                setPipelineTimeout(1) // Clean up shortly
             }
         }
     }
@@ -432,27 +450,41 @@ class ClientHandler(
     }
 
     private fun resetPipeline() {
+        val wasListening = pipelineStatus == PipelineStatus.LISTENING
         activePipelines.set(0)
         currentSession = null
         receivedSynthesize = false
         mediaManager.updateVolumeDucking("all", false)
+        mediaManager.pcmMediaPlayer.stop()
+        
         if (pipelineStatus != PipelineStatus.INACTIVE) {
             releaseInputAudioStream()
         }
-        sendAudioStop()
+        
+        if (wasListening) {
+            sendAudioStop()
+        }
+        
         pipelineStatus = PipelineStatus.INACTIVE
+        cancelPipelineTimeout()
     }
 
     private fun processSettingsPacket(packet: WyomingPacket) {
-        val settings = packet.getProp("settings").ifEmpty { packet.data.toString() }
-        config.processSettings(settings)
+        val settingsStr = packet.getProp("settings").ifEmpty { packet.data.toString() }
+        config.processSettings(settingsStr)
     }
 
     private fun handleCustomEvent(event: WyomingPacket) {
-        // TODO: Normalize incoming custom events into a standard structure in a dedicated parser.
         // HA integration sometimes nests data in a "data" key, sometimes puts it at top level.
         val eventData = event.data["data"]?.jsonObject ?: event.data
         val eventType = event.getProp("event_type")
+
+        // Look for continue_conversation in any custom event to set session state
+        findContinueConversation(eventData)?.let {
+            log.d("Continuing conversation state updated from custom event ($eventType): $it")
+            currentSession?.forceContinue = it
+        }
+
         val innerPacket = WyomingPacket(eventType, eventData)
 
         when (eventType) {
@@ -522,6 +554,9 @@ class ClientHandler(
     }
 
     fun sendStartPipeline() {
+        if (pipelineStatus == PipelineStatus.LISTENING) {
+            releaseInputAudioStream()
+        }
         val nextId = activePipelines.incrementAndGet()
         currentSession = PipelineSession(nextId)
         
@@ -537,7 +572,7 @@ class ClientHandler(
             }
         })
         receivedSynthesize = false
-        setPipelineTimeout(10)
+        setPipelineTimeout(15)
     }
 
     fun sendAudioStop() {
@@ -591,10 +626,20 @@ class ClientHandler(
     }
 
     fun sendEvent(type: String, data: JsonObject = buildJsonObject {}, payload: ByteArray = ByteArray(0)) {
-        runCatching {
-            val event = WyomingPacket(type, data, payload)
-            messenger.sendEvent(event, pipelineStatus)
-        }.onFailure { log.e("Failed to send event $type: $it") }
+        if (!isRunning.get() || client.isClosed) return
+        
+        sendExecutor.execute {
+            runCatching {
+                val event = WyomingPacket(type, data, payload)
+                // We use the latest LATEST pipelineStatus here to filter out late 'audio-chunks' 
+                // if the pipeline was deactivated while they were still in the queue.
+                messenger.sendEvent(event, this.pipelineStatus)
+            }.onFailure { 
+                if (isRunning.get()) {
+                    log.e("Failed to send event $type: ${it.message}")
+                }
+            }
+        }
     }
 
     private fun readEvent(): WyomingPacket? = messenger.readEvent()
@@ -602,5 +647,18 @@ class ClientHandler(
     companion object {
         private val IGNORED_LOG_EVENTS = setOf("ping", "pong", "audio-chunk")
         private fun isoNow(): String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
+
+        /**
+         * Robustly searches for a 'continue_conversation' boolean in a JSON object,
+         * including nested intent_output structures.
+         */
+        private fun findContinueConversation(data: JsonObject): Boolean? {
+            // Extract from HA's intent-output event: intent_output.continue_conversation
+            data["intent_output"]?.jsonObject?.let { output ->
+                output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { return it }
+            }
+            
+            return null
+        }
     }
 }

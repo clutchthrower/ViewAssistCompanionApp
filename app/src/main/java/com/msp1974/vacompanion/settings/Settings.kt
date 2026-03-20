@@ -283,7 +283,6 @@ class APPConfig(val context: Context) {
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
         settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
         settings["raw_proximity_threshold"]?.jsonPrimitive?.intOrNull?.let { rawProximitySensorThreshold = it }
-        settings["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { continueConversation = it }
         settings["notification_volume"]?.jsonPrimitive?.intOrNull?.let { notificationVolume = it }
         settings["music_volume"]?.jsonPrimitive?.intOrNull?.let { musicVolume = it }
         settings["ducking_volume"]?.jsonPrimitive?.intOrNull?.let { duckingVolume = it }

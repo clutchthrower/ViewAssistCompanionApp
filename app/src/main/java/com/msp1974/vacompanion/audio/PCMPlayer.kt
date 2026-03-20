@@ -4,8 +4,10 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import com.msp1974.vacompanion.utils.Logger
 
 class PCMMediaPlayer(context: Context) {
+    private val log = Logger()
     private var sampleRate = 22050
     private var channelCount = 1
     private var bytesPerSample = 2
@@ -45,20 +47,12 @@ class PCMMediaPlayer(context: Context) {
     }
 
     fun play() {
-        if (isPlaying) return
+        if (audioTrack != null) {
+            stop(force = true)
+        }
 
         isPlaying = true
         audioTrack = createAudioTrack().apply { play() }
-
-        Thread {
-            try {
-                while (isPlaying && buffer.size == bufferSize) {
-                    Thread.sleep(10)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }.start()
     }
 
     fun writeAudio(buffer: ByteArray) {
@@ -67,15 +61,19 @@ class PCMMediaPlayer(context: Context) {
 
     fun stop(force: Boolean = false) {
         isPlaying = false
-        if (force) {
-            audioTrack?.pause()
-        } else {
-            audioTrack?.stop()
+        audioTrack?.let { track ->
+            try {
+                if (force) {
+                    track.pause()
+                    track.flush()
+                    track.release()
+                    audioTrack = null
+                } else {
+                    track.stop()
+                }
+            } catch (e: Exception) {
+                log.w("Error stopping AudioTrack: ${e.message}")
+            }
         }
-        audioTrack?.apply {
-            flush()
-            release()
-        }
-        audioTrack = null
     }
 }
