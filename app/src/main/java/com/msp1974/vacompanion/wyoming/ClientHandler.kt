@@ -57,6 +57,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
     private var runClient: Boolean = true
     private var satelliteStatus: SatelliteState = SatelliteState.STOPPED
+    @Volatile
     private var pipelineStatus: PipelineStatus = PipelineStatus.INACTIVE
     private val connectionID: String = "${client.inetAddress.hostAddress}"
 
@@ -67,6 +68,8 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     private var musicPlayer: VAMediaPlayer = VAMediaPlayer.getInstance(context)
 
     private var expectingTTSResponse: Boolean = false
+    private var receivedSynthesize: Boolean = false
+    private var pendingWakeWord: Boolean = false
     private var lastResponseIsQuestion: Boolean = false
     private val activePipelines = AtomicInteger(0)
 
@@ -91,14 +94,16 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             else -> {
                                 if (intent.action == BroadcastSender.WAKE_WORD_DETECTED) {
                                     // If currently recording for a previous pipeline, abort it cleanly
-                                    // so HA transitions out of "Listening" state before the new pipeline starts
-                                    if (pipelineStatus == PipelineStatus.LISTENING) {
+                                    if (pipelineStatus == PipelineStatus.LISTENING || activePipelines.get() > 0) {
                                         releaseInputAudioStream()
                                         sendAudioStop()
+                                        pendingWakeWord = true
+                                        volumeDucking("all", true)
+                                    } else {
+                                        volumeDucking("all", true)
+                                        sendWakeWordDetection()
+                                        sendStartPipeline()
                                     }
-                                    volumeDucking("all", true)
-                                    sendWakeWordDetection()
-                                    sendStartPipeline()
                                 }
                             }
                         }
@@ -313,6 +318,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             lastResponseIsQuestion =
                                 (event.getProp("text").replace("\n", "").endsWith("?"))
                             expectingTTSResponse = true
+                            receivedSynthesize = true
                             setPipelineNextStageTimeout(10)
                         }
                     }
@@ -326,6 +332,12 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             }
                             if (pipelineStatus != PipelineStatus.STREAMING) {
                                 releaseInputAudioStream()
+                            }
+                            if (pendingWakeWord) {
+                                pendingWakeWord = false
+                                volumeDucking("all", true)
+                                sendWakeWordDetection()
+                                sendStartPipeline()
                             }
                         }
                     }
@@ -357,12 +369,19 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             if (pcmMediaPlayer.isPlaying) {
                                 pcmMediaPlayer.stop()
                             }
-                            pipelineStatus = PipelineStatus.INACTIVE
+                            
+                            if (receivedSynthesize) {
+                                pipelineStatus = PipelineStatus.INACTIVE
 
-                            if (config.continueConversation || lastResponseIsQuestion) {
-                                sendStartPipeline()
+                                if (config.continueConversation || lastResponseIsQuestion) {
+                                    sendStartPipeline()
+                                } else {
+                                    setPipelineNextStageTimeout(2)
+                                }
                             } else {
-                                setPipelineNextStageTimeout(2)
+                                // This was likely a Wake Sound or early media. Restore recording.
+                                pipelineStatus = PipelineStatus.LISTENING
+                                setPipelineNextStageTimeout(10)
                             }
                         }
 
@@ -372,6 +391,13 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                         if (closePipeline()) {
                             config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
                             resetPipeline()
+                            
+                            if (pendingWakeWord) {
+                                pendingWakeWord = false
+                                volumeDucking("all", true)
+                                sendWakeWordDetection()
+                                sendStartPipeline()
+                            }
                         }
                     }
 
@@ -406,11 +432,19 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     private fun handlePipelineTimeout() {
         log.d("Pipeline timed out")
         resetPipeline()
+        
+        if (pendingWakeWord) {
+            pendingWakeWord = false
+            volumeDucking("all", true)
+            sendWakeWordDetection()
+            sendStartPipeline()
+        }
     }
 
     private fun resetPipeline() {
         activePipelines.set(0)
         expectingTTSResponse = false
+        receivedSynthesize = false
 
         volumeDucking("all", false)
 
@@ -688,6 +722,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
             }
         )
         lastResponseIsQuestion = false
+        receivedSynthesize = false
         setPipelineNextStageTimeout(10)
     }
 
@@ -701,6 +736,8 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     }
 
     fun sendAudio(audio: ByteArray) {
+        if (pipelineStatus != PipelineStatus.LISTENING) return
+
         val data = buildJsonObject {
             put("rate", config.sampleRate)
             put("width", config.audioWidth)
@@ -848,7 +885,12 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
         return null
     }
 
+    @Synchronized
     private fun writeEvent(p: WyomingPacket) {
+        if (p.type == "audio-chunk" && pipelineStatus != PipelineStatus.LISTENING) {
+            return
+        }
+
         if (p.type != "ping" && p.type != "pong" && p.type != "audio-chunk") {
             log.d("Sending to $client_id: ${p.toMap()}")
         }
