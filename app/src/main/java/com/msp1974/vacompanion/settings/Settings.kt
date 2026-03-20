@@ -14,7 +14,7 @@ import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventNotifier
 import com.msp1974.vacompanion.utils.Logger
-import org.json.JSONObject
+import kotlinx.serialization.json.*
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.properties.Delegates
@@ -272,119 +272,45 @@ class APPConfig(val context: Context) {
 
     fun processSettings(settingString: String) {
         initSettings = true
-        val settings = JSONObject(settingString)
-        if (settings.has("ha_port")) {
-            homeAssistantHTTPPort = settings["ha_port"] as Int
-        }
-        if (settings.has("ha_url")) {
-            homeAssistantURL = settings["ha_url"] as String
-        }
-        if (settings.has("ha_dashboard")) {
-            homeAssistantDashboard = settings["ha_dashboard"] as String
-        }
-        if (settings.has("advanced_gain")) {
-            useAdvancedGain = settings["advanced_gain"] as Boolean
-        }
-        if (settings.has("wake_word_engine")) {
-            wakeWordEngine = settings["wake_word_engine"] as String
-        }
-        if (settings.has("wake_word")) {
-            wakeWord = settings["wake_word"] as String
-        }
-        if (settings.has("wake_word_sound")) {
-            wakeWordSound = settings["wake_word_sound"] as String
-        }
-        if (settings.has("wake_word_threshold")) {
-            wakeWordThreshold = settings.getInt("wake_word_threshold").toFloat() / 10
-        }
-        if (settings.has("raw_proximity_threshold")) {
-            rawProximitySensorThreshold = settings.getInt("raw_proximity_threshold")
-        }
-        if (settings.has("continue_conversation")) {
-            continueConversation = settings["continue_conversation"] as Boolean
-        }
-        if (settings.has("notification_volume")) {
-            notificationVolume = settings.getInt("notification_volume")
-        }
-        if (settings.has("music_volume")) {
-            musicVolume = settings.getInt("music_volume")
-        }
-        if (settings.has("ducking_volume")) {
-            duckingVolume = settings.getInt("ducking_volume")
-        }
-        if (settings.has("mic_gain")) {
-            micGain = settings.getInt("mic_gain")
-        }
-        if (settings.has("mute")) {
-            isMuted = settings["mute"] as Boolean
-        }
-        if (settings.has("screen_brightness")) {
-            screenBrightness = settings.getInt("screen_brightness").toFloat() / 100
-        }
-        if (settings.has("screen_auto_brightness")) {
-            screenAutoBrightness = settings.getBoolean("screen_auto_brightness")
-        }
-        if (settings.has("swipe_refresh")) {
-            swipeRefresh = settings.getBoolean("swipe_refresh")
-        }
-        if (settings.has("screen_always_on")) {
-            screenAlwaysOn = settings.getBoolean("screen_always_on")
-        }
-        if (settings.has("do_not_disturb")) {
-            doNotDisturb = settings.getBoolean("do_not_disturb")
-        }
-        if (settings.has("dark_mode")) {
-            darkMode = settings.getBoolean("dark_mode")
-        }
-        if (settings.has("diagnostics_enabled")) {
-            diagnosticsEnabled = settings.getBoolean("diagnostics_enabled")
-        }
-        if (settings.has("integration_version")) {
-            integrationVersion = settings.getString("integration_version")
-        }
-        if (settings.has("min_required_apk_version")) {
-            minRequiredApkVersion = settings.getString("min_required_apk_version")
-        }
-        if (settings.has("zoom_level")) {
-            zoomLevel = settings.getInt("zoom_level")
-        }
-        if (settings.has("screen_on_wake_word")) {
-            screenOnWakeWord = settings.getBoolean("screen_on_wake_word")
-        }
-        if (settings.has("screen_on_bump")) {
-            screenOnBump = settings.getBoolean("screen_on_bump")
-        }
-        if (settings.has("screen_on_proximity")) {
-            screenOnProximity = settings.getBoolean("screen_on_proximity")
-        }
-        if (settings.has("screen_on_motion")) {
-            screenOnMotion = settings.getBoolean("screen_on_motion")
-        }
-        if (settings.has("screen_on")) {
-            screenOn = settings.getBoolean("screen_on")
-        }
-        if (settings.has("enable_network_recovery")) {
-            enableNetworkRecovery = settings.getBoolean("enable_network_recovery")
-        }
-        if (settings.has("enable_motion_detection")) {
-            enableMotionDetection = settings.getBoolean("enable_motion_detection")
-        }
-        if (settings.has("motion_detection_sensitivity")) {
-            motionDetectionSensitivity = settings.getInt("motion_detection_sensitivity")
-        }
-        if (settings.has("screen_timeout")) {
-            screenTimeout = settings.getInt("screen_timeout") * 1000
-        }
-        if (settings.has("bump_sensitivity")) {
-            bumpSensitivity = settings.getInt("bump_sensitivity").toFloat() / 10
-        }
-        if (settings.has("screen_saver")) {
-            screenSaver = settings.getBoolean("screen_saver")
-        }
-        if (settings.has("screen_orientation_mode")) {
-            screenOrientationMode = settings.getString("screen_orientation_mode")
-        }
-
+        val settings = Json.parseToJsonElement(settingString).jsonObject
+        
+        settings["ha_port"]?.jsonPrimitive?.intOrNull?.let { homeAssistantHTTPPort = it }
+        settings["ha_url"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantURL = it }
+        settings["ha_dashboard"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantDashboard = it }
+        settings["advanced_gain"]?.jsonPrimitive?.booleanOrNull?.let { useAdvancedGain = it }
+        settings["wake_word_engine"]?.jsonPrimitive?.contentOrNull?.let { wakeWordEngine = it }
+        settings["wake_word"]?.jsonPrimitive?.contentOrNull?.let { wakeWord = it }
+        settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
+        settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
+        settings["raw_proximity_threshold"]?.jsonPrimitive?.intOrNull?.let { rawProximitySensorThreshold = it }
+        settings["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { continueConversation = it }
+        settings["notification_volume"]?.jsonPrimitive?.intOrNull?.let { notificationVolume = it }
+        settings["music_volume"]?.jsonPrimitive?.intOrNull?.let { musicVolume = it }
+        settings["ducking_volume"]?.jsonPrimitive?.intOrNull?.let { duckingVolume = it }
+        settings["mic_gain"]?.jsonPrimitive?.intOrNull?.let { micGain = it }
+        settings["mute"]?.jsonPrimitive?.booleanOrNull?.let { isMuted = it }
+        settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
+        settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
+        settings["swipe_refresh"]?.jsonPrimitive?.booleanOrNull?.let { swipeRefresh = it }
+        settings["screen_always_on"]?.jsonPrimitive?.booleanOrNull?.let { screenAlwaysOn = it }
+        settings["do_not_disturb"]?.jsonPrimitive?.booleanOrNull?.let { doNotDisturb = it }
+        settings["dark_mode"]?.jsonPrimitive?.booleanOrNull?.let { darkMode = it }
+        settings["diagnostics_enabled"]?.jsonPrimitive?.booleanOrNull?.let { diagnosticsEnabled = it }
+        settings["integration_version"]?.jsonPrimitive?.contentOrNull?.let { integrationVersion = it }
+        settings["min_required_apk_version"]?.jsonPrimitive?.contentOrNull?.let { minRequiredApkVersion = it }
+        settings["zoom_level"]?.jsonPrimitive?.intOrNull?.let { zoomLevel = it }
+        settings["screen_on_wake_word"]?.jsonPrimitive?.booleanOrNull?.let { screenOnWakeWord = it }
+        settings["screen_on_bump"]?.jsonPrimitive?.booleanOrNull?.let { screenOnBump = it }
+        settings["screen_on_proximity"]?.jsonPrimitive?.booleanOrNull?.let { screenOnProximity = it }
+        settings["screen_on_motion"]?.jsonPrimitive?.booleanOrNull?.let { screenOnMotion = it }
+        settings["screen_on"]?.jsonPrimitive?.booleanOrNull?.let { screenOn = it }
+        settings["enable_network_recovery"]?.jsonPrimitive?.booleanOrNull?.let { enableNetworkRecovery = it }
+        settings["enable_motion_detection"]?.jsonPrimitive?.booleanOrNull?.let { enableMotionDetection = it }
+        settings["motion_detection_sensitivity"]?.jsonPrimitive?.intOrNull?.let { motionDetectionSensitivity = it }
+        settings["screen_timeout"]?.jsonPrimitive?.intOrNull?.let { screenTimeout = it * 1000 }
+        settings["bump_sensitivity"]?.jsonPrimitive?.floatOrNull?.let { bumpSensitivity = it / 10 }
+        settings["screen_saver"]?.jsonPrimitive?.booleanOrNull?.let { screenSaver = it }
+        settings["screen_orientation_mode"]?.jsonPrimitive?.contentOrNull?.let { screenOrientationMode = it }
 
         Firebase.crashlytics.log("Settings update")
     }

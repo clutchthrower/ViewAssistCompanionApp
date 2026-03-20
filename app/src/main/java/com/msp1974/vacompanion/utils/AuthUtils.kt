@@ -10,7 +10,7 @@ import com.msp1974.vacompanion.jsinterface.ExternalAuthCallback
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
+import kotlinx.serialization.json.*
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -227,18 +227,32 @@ class AuthUtils(val config: APPConfig) {
             log.d("URL: ${getTokenUrl(baseUrl)} Auth code: $authCode, client id: ${getClientId()}")
             val response = httpPOST(url, map, verifySSL)
             try {
-                val json = JSONObject(response)
-                val expiresIn = System.currentTimeMillis() + (json.getString("expires_in").toInt() * 1000)
+                val json = Json.parseToJsonElement(response).jsonObject
+                val accessToken = json["access_token"]?.jsonPrimitive?.content ?: ""
+                val tokenType = json["token_type"]?.jsonPrimitive?.content ?: ""
+                val refreshToken = json["refresh_token"]?.jsonPrimitive?.content ?: ""
+                
+                if (accessToken.isEmpty() || tokenType.isEmpty()) {
+                    log.e("Authentication failed: Required token fields missing")
+                    return AuthToken()
+                }
 
+                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
+                if (expiresInSeconds == null || expiresInSeconds <= 0) {
+                    log.e("Authentication failed: invalid expires_in")
+                    return AuthToken()
+                }
+                
+                val expiresIn = System.currentTimeMillis() + (expiresInSeconds * 1000)
 
                 return AuthToken(
-                    json.getString("token_type"),
-                    json.getString("access_token"),
+                    tokenType,
+                    accessToken,
                     expiresIn,
-                    json.getString("refresh_token")
+                    refreshToken
                 )
             } catch (e: Exception) {
-                log.e(e.message.toString())
+                log.e("Failed to parse auth response: ${e.message}")
                 return AuthToken()
             }
         }
@@ -253,17 +267,32 @@ class AuthUtils(val config: APPConfig) {
             log.d("URL: ${getTokenUrl(host)} Refresh token: $refreshToken, client id: ${getClientId()}")
             val response = httpPOST(url, map, verifySSL)
             try {
-                val json = JSONObject(response)
-                log.d("JSON reposne: $json")
-                val expiresIn = System.currentTimeMillis() + (json.getString("expires_in").toInt() * 1000)
+                val json = Json.parseToJsonElement(response).jsonObject
+                log.d("JSON response: $json")
+                
+                val accessToken = json["access_token"]?.jsonPrimitive?.content ?: ""
+                val tokenType = json["token_type"]?.jsonPrimitive?.content ?: ""
+                
+                if (accessToken.isEmpty() || tokenType.isEmpty()) {
+                    log.e("Token refresh failed: Required fields missing")
+                    return AuthToken()
+                }
+
+                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
+                if (expiresInSeconds == null || expiresInSeconds <= 0) {
+                    log.e("Token refresh failed: invalid expires_in")
+                    return AuthToken()
+                }
+
+                val expiresIn = System.currentTimeMillis() + (expiresInSeconds * 1000)
 
                 return AuthToken(
-                    json.getString("token_type"),
-                    json.getString("access_token"),
+                    tokenType,
+                    accessToken,
                     expiresIn,
                 )
             } catch (e: Exception) {
-                log.e(e.message.toString())
+                log.e("Failed to parse refresh response: ${e.message}")
                 return AuthToken()
             }
 

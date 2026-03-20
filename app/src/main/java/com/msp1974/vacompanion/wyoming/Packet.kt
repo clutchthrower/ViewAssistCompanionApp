@@ -1,26 +1,23 @@
 package com.msp1974.vacompanion.wyoming
 
-import org.json.JSONObject
+import kotlinx.serialization.json.*
 
-class WyomingPacket (event: JSONObject) {
-    val type: String = event.getString("type")
-    private var data: JSONObject = event.getJSONObject("data")
+class WyomingPacket (
+    val type: String,
+    val data: JsonObject = buildJsonObject {},
     var payload: ByteArray = ByteArray(0)
+) {
+    private val cachedDataLength: Int by lazy { data.toString().toByteArray().size }
 
     fun getProp(prop: String): String {
-        return data.getString(prop)
-    }
-
-    fun setProp(prop: String, value: String) {
-        data.put(prop, value)
-    }
-
-    fun getDataLength(): Int {
-        return data.toString().length
+        return data[prop]?.jsonPrimitive?.contentOrNull ?: ""
     }
 
     fun toMap(): MutableMap<String, Any> {
         return mutableMapOf("type" to type, "data" to data)
     }
 
+    fun getDataLength(): Int {
+        return cachedDataLength
+    }
 }
