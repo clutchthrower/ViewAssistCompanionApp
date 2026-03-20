@@ -38,6 +38,7 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Timer
 import java.util.TimerTask
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
@@ -67,7 +68,10 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
     private var expectingTTSResponse: Boolean = false
     private var lastResponseIsQuestion: Boolean = false
-    private var activePipelines: Int = 0
+    private val activePipelines = AtomicInteger(0)
+
+    private fun isLatestPipeline() = activePipelines.get() <= 1
+    private fun closePipeline() = activePipelines.decrementAndGet() == 0
 
     // Initiate wake word broadcast receiver
     var wakeWordBroadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -86,6 +90,12 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                             }
                             else -> {
                                 if (intent.action == BroadcastSender.WAKE_WORD_DETECTED) {
+                                    // If currently recording for a previous pipeline, abort it cleanly
+                                    // so HA transitions out of "Listening" state before the new pipeline starts
+                                    if (pipelineStatus == PipelineStatus.LISTENING) {
+                                        releaseInputAudioStream()
+                                        sendAudioStop()
+                                    }
                                     volumeDucking("all", true)
                                     sendWakeWordDetection()
                                     sendStartPipeline()
@@ -286,9 +296,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "transcript" -> {
                         // Sent when STT converted voice command to text
-                        if (activePipelines > 1) {
-                            log.d("Ignoring transcript event for old pipeline (active=$activePipelines)")
-                        } else {
+                        if (isLatestPipeline()) {
                             releaseInputAudioStream()
                             if (event.getProp("text").lowercase().contains("never mind")) {
                                 volumeDucking("all", false)
@@ -301,9 +309,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "synthesize" -> {
                         // Sent when conversation engine sent response to command
-                        if (activePipelines > 1) {
-                            log.d("Ignoring synthesize event for old pipeline (active=$activePipelines)")
-                        } else {
+                        if (isLatestPipeline()) {
                             lastResponseIsQuestion =
                                 (event.getProp("text").replace("\n", "").endsWith("?"))
                             expectingTTSResponse = true
@@ -313,10 +319,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "pipeline-ended" -> {
                         // Sent when pipeline has finished
-                        if (activePipelines > 0) activePipelines--
-                        if (activePipelines > 0) {
-                            log.d("Ignoring pipeline-ended event for old pipeline (active=$activePipelines)")
-                        } else {
+                        if (closePipeline()) {
                             if (!expectingTTSResponse) {
                                 cancelPipelineNextStageTimeout()
                                 volumeDucking("all", false)
@@ -329,9 +332,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "audio-start" -> {
                         // Sent when audio stream about to start
-                        if (activePipelines > 1) {
-                            log.d("Ignoring audio-start event for old pipeline (active=$activePipelines)")
-                        } else {
+                        if (isLatestPipeline()) {
                             expectingTTSResponse = false  // This is it so reset expecting
                             cancelPipelineNextStageTimeout() // Playing audio, cancel any timeout
                             pipelineStatus = PipelineStatus.STREAMING
@@ -342,23 +343,21 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
 
                     "audio-chunk" -> {
                         // Audio chunk
-                        if (activePipelines <= 1 && pcmMediaPlayer.isPlaying) {
+                        if (isLatestPipeline() && pcmMediaPlayer.isPlaying) {
                             pcmMediaPlayer.writeAudio(event.payload)
                         }
                     }
 
                     "audio-stop" -> {
                         // Sent when all audio chunks sent
-                        if (activePipelines > 1) {
-                            log.d("Ignoring audio-stop event for old pipeline (active=$activePipelines)")
-                        } else {
+                        // Always send "played" so HA can finalise the pipeline and send pipeline-ended,
+                        // even if this is a stale pipeline (otherwise activePipelines never decrements)
+                        sendEvent("played")
+                        if (isLatestPipeline()) {
                             if (pcmMediaPlayer.isPlaying) {
                                 pcmMediaPlayer.stop()
                             }
                             pipelineStatus = PipelineStatus.INACTIVE
-                            sendEvent(
-                                "played",
-                            )
 
                             if (config.continueConversation || lastResponseIsQuestion) {
                                 sendStartPipeline()
@@ -370,10 +369,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
                     }
 
                     "error" -> {
-                        if (activePipelines > 0) activePipelines--
-                        if (activePipelines > 0) {
-                            log.d("Ignoring error event for old pipeline (active=$activePipelines)")
-                        } else {
+                        if (closePipeline()) {
                             config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
                             resetPipeline()
                         }
@@ -413,7 +409,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     }
 
     private fun resetPipeline() {
-        activePipelines = 0
+        activePipelines.set(0)
         expectingTTSResponse = false
 
         volumeDucking("all", false)
@@ -676,7 +672,7 @@ class ClientHandler(private val context: Context, private val server: WyomingTCP
     }
 
     fun sendStartPipeline() {
-        activePipelines++
+        activePipelines.incrementAndGet()
         sendEvent(
             "run-pipeline",
             buildJsonObject {
