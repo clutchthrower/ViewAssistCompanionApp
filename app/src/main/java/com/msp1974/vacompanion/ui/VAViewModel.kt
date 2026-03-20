@@ -70,7 +70,11 @@ class VAViewModel: ViewModel(), EventListener {
         _vacaState.update { currentState ->
             currentState.copy(
                 launchOnBoot = config!!.startOnBoot,
-                swipeRefreshEnabled = config!!.swipeRefresh
+                swipeRefreshEnabled = config!!.swipeRefresh,
+                // TODO: Move this into a dedicated configuration observer pattern to handle live updates.
+                diagnosticInfo = currentState.diagnosticInfo.copy(
+                    show = config!!.diagnosticsEnabled
+                )
             )
         }
     }

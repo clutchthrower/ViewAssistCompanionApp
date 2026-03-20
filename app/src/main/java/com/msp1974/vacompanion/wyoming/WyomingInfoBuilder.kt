@@ -2,11 +2,13 @@ package com.msp1974.vacompanion.wyoming
 
 import android.content.Context
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.DeviceCapabilitiesData
+import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.WakeWords
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.*
 
-class WyomingInfoBuilder(private val context: Context, private val config: APPConfig) {
+class WyomingInfoBuilder(private val context: Context, private val config: APPConfig, private val deviceInfo: DeviceCapabilitiesData) {
     
     @OptIn(ExperimentalSerializationApi::class)
     fun buildInfo(): JsonObject {
@@ -73,6 +75,9 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
                 }
                 putJsonArray("active_wake_words") { add(JsonPrimitive(config.wakeWord)) }
                 put("max_active_wake_words", 1)
+                
+                // TODO: Review if this nested structure should be part of the core satellite object or a custom feature.
+                put("capabilities", DeviceCapabilitiesManager.toJson(deviceInfo))
             }
         }
     }

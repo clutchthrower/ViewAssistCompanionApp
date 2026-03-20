@@ -9,7 +9,7 @@ import java.net.ServerSocket
 import kotlin.concurrent.thread
 
 enum class SatelliteState { STOPPED, RUNNING, STARTING, STOPPING}
-enum class PipelineStatus { INACTIVE, LISTENING, STREAMING }
+enum class PipelineStatus { INACTIVE, LISTENING, STREAMING, AWAITING_TTS }
 
 interface WyomingCallback {
     fun onSatelliteStarted()

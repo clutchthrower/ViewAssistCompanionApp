@@ -54,31 +54,25 @@ class ClientHandler(
 
     private val mediaManager = WyomingMediaManager(context)
     private val actionHandler = WyomingActionHandler(context, config, mediaManager, log)
-    private val infoBuilder = WyomingInfoBuilder(context, config)
+    private val infoBuilder = WyomingInfoBuilder(context, config, server.deviceInfo)
 
-    @Volatile
-    private var expectingTTSResponse = false
     @Volatile
     private var receivedSynthesize = false
     @Volatile
     private var pendingWakeWord = false
-    @Volatile
-    private var lastResponseIsQuestion = false
     
     private val activePipelines = AtomicInteger(0)
+    private var currentSession: PipelineSession? = null
+
+    private class PipelineSession(val id: Int) {
+        @Volatile var logicFinished = false
+        @Volatile var audioFinished = false
+        @Volatile var finalized = false
+    }
+
+    private fun isPipelineActive() = currentSession != null
 
     private val pipelineTimeoutRunnable = Runnable { handlePipelineTimeout() }
-
-    private fun isLatestPipeline() = activePipelines.get() == 1
-    private fun closePipeline(): Boolean {
-        while (true) {
-            val current = activePipelines.get()
-            if (current <= 0) return false
-            if (activePipelines.compareAndSet(current, current - 1)) {
-                return current - 1 == 0
-            }
-        }
-    }
 
     private val broadcastExecutor = Executors.newSingleThreadExecutor()
 
@@ -163,7 +157,7 @@ class ClientHandler(
 
     private fun handleWakeWordDetected() {
         mediaManager.updateVolumeDucking("all", true)
-        if (pipelineStatus == PipelineStatus.LISTENING || activePipelines.get() > 0) {
+        if (pipelineStatus == PipelineStatus.LISTENING || isPipelineActive()) {
             // Abort current pipeline cleanly
             releaseInputAudioStream()
             sendAudioStop()
@@ -194,8 +188,6 @@ class ClientHandler(
                 LocalBroadcastManager.getInstance(context).registerReceiver(wakeWordReceiver, intentFilter)
 
                 config.homeAssistantConnectedIP = connectionId
-                expectingTTSResponse = false
-                lastResponseIsQuestion = false
 
                 // Ensure media players are stopped on new or takeover session
                 handleAlarmAction(false)
@@ -273,9 +265,12 @@ class ClientHandler(
             when (event.type) {
                 "ping" -> sendPong()
                 "describe" -> sendInfo()
-                "custom-settings" -> config.processSettings(event.getProp("settings"))
+                "settings",
+                "custom-settings" -> processSettingsPacket(event)
                 "capabilities" -> sendCapabilities()
                 "run-satellite" -> startSatellite()
+                "action",
+                "custom-action" -> handleCustomAction(event)
                 "custom-event" -> handleCustomEvent(event)
             }
 
@@ -304,13 +299,12 @@ class ClientHandler(
             "audio-chunk" -> handleAudioChunk(event)
             "audio-stop" -> handleAudioStop()
             "error" -> handlePipelineError(event)
-            "custom-action" -> handleCustomAction(event)
             "timer-finished" -> handleAlarmAction(true)
         }
     }
 
     private fun handleTranscript(event: WyomingPacket) {
-        if (isLatestPipeline()) {
+        if (isPipelineActive()) {
             releaseInputAudioStream()
             if (event.getProp("text").lowercase().contains("never mind")) {
                 mediaManager.updateVolumeDucking("all", false)
@@ -321,33 +315,51 @@ class ClientHandler(
     }
 
     private fun handleSynthesize(event: WyomingPacket) {
-        if (isLatestPipeline()) {
-            lastResponseIsQuestion = event.getProp("text").trimEnd().endsWith("?")
-            expectingTTSResponse = true
+        if (isPipelineActive()) {
+            pipelineStatus = PipelineStatus.AWAITING_TTS
             receivedSynthesize = true
             setPipelineTimeout(10)
         }
     }
 
     private fun handlePipelineEnded() {
-        if (closePipeline()) {
-            if (!expectingTTSResponse) {
-                cancelPipelineTimeout()
-                mediaManager.updateVolumeDucking("all", false)
+        val session = currentSession ?: return
+
+        session.logicFinished = true
+
+        if (pipelineStatus == PipelineStatus.AWAITING_TTS || pipelineStatus == PipelineStatus.STREAMING) {
+            log.d("Pipeline ended but TTS is in status $pipelineStatus. Waiting for audio to complete session ${session.id}.")
+            return
+        }
+
+        checkFinalizeSession(session)
+    }
+
+    private fun checkFinalizeSession(session: PipelineSession) {
+        // A session is complete if logic ended AND (audio ended OR we never expected audio)
+        val audioDone = session.audioFinished || !receivedSynthesize
+        
+        if (session.logicFinished && audioDone && !session.finalized) {
+            session.finalized = true
+            if (currentSession == session) {
+                activePipelines.decrementAndGet()
+                finalizePipeline()
+                currentSession = null
             }
-            // If we ARE expecting TTS, the timeout is already running.
-            // If it never arrives, handlePipelineTimeout will clean up.
-            
-            if (pipelineStatus != PipelineStatus.STREAMING) {
-                releaseInputAudioStream()
-            }
-            processPendingWakeWord()
         }
     }
 
+    private fun finalizePipeline() {
+        cancelPipelineTimeout()
+        mediaManager.updateVolumeDucking("all", false)
+        if (pipelineStatus != PipelineStatus.STREAMING) {
+            releaseInputAudioStream()
+        }
+        processPendingWakeWord()
+    }
+
     private fun handleAudioStart() {
-        if (isLatestPipeline()) {
-            expectingTTSResponse = false
+        if (isPipelineActive()) {
             cancelPipelineTimeout()
             pipelineStatus = PipelineStatus.STREAMING
             mediaManager.updateVolumeDucking("all", true)
@@ -356,38 +368,43 @@ class ClientHandler(
     }
 
     private fun handleAudioChunk(event: WyomingPacket) {
-        if (isLatestPipeline() && mediaManager.pcmMediaPlayer.isPlaying) {
+        if (isPipelineActive() && mediaManager.pcmMediaPlayer.isPlaying) {
             mediaManager.pcmMediaPlayer.writeAudio(event.payload)
         }
     }
 
     private fun handleAudioStop() {
-        if (isLatestPipeline()) {
+        if (isPipelineActive()) {
             if (mediaManager.pcmMediaPlayer.isPlaying) {
                 sendEvent("played")
                 mediaManager.pcmMediaPlayer.stop()
             }
             
             pipelineStatus = PipelineStatus.INACTIVE
-            if (receivedSynthesize) {
-                if (config.continueConversation || lastResponseIsQuestion) {
+            val hadSynthesize = receivedSynthesize
+            val session = currentSession
+            
+            if (session != null) {
+                session.audioFinished = true
+                checkFinalizeSession(session)
+            }
+
+            if (hadSynthesize) {
+                if (config.continueConversation) {
                     sendStartPipeline()
                 } else {
                     setPipelineTimeout(2)
                 }
             } else {
-                // If we didn't get synthesize, we don't jump back to LISTENING automatically.
                 setPipelineTimeout(1) // Clean up shortly
             }
         }
     }
 
     private fun handlePipelineError(event: WyomingPacket) {
-        if (closePipeline()) {
-            config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
-            resetPipeline()
-            processPendingWakeWord()
-        }
+        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
+        resetPipeline()
+        processPendingWakeWord()
     }
 
     private fun processPendingWakeWord() {
@@ -416,7 +433,7 @@ class ClientHandler(
 
     private fun resetPipeline() {
         activePipelines.set(0)
-        expectingTTSResponse = false
+        currentSession = null
         receivedSynthesize = false
         mediaManager.updateVolumeDucking("all", false)
         if (pipelineStatus != PipelineStatus.INACTIVE) {
@@ -426,11 +443,28 @@ class ClientHandler(
         pipelineStatus = PipelineStatus.INACTIVE
     }
 
+    private fun processSettingsPacket(packet: WyomingPacket) {
+        val settings = packet.getProp("settings").ifEmpty { packet.data.toString() }
+        config.processSettings(settings)
+    }
+
     private fun handleCustomEvent(event: WyomingPacket) {
-        when (event.getProp("event_type")) {
-            "action" -> handleCustomAction(event)
-            "settings" -> config.processSettings(event.getProp("settings"))
+        // TODO: Normalize incoming custom events into a standard structure in a dedicated parser.
+        // HA integration sometimes nests data in a "data" key, sometimes puts it at top level.
+        val eventData = event.data["data"]?.jsonObject ?: event.data
+        val eventType = event.getProp("event_type")
+        val innerPacket = WyomingPacket(eventType, eventData)
+
+        when (eventType) {
+            "action" -> handleCustomAction(innerPacket)
+            "settings" -> processSettingsPacket(innerPacket)
             "capabilities" -> sendCapabilities()
+            else -> {
+                // Handle as action if eventType is the action name
+                actionHandler.handleAction(eventType, eventData.toString()) { enable, url ->
+                    handleAlarmAction(enable, url)
+                }
+            }
         }
     }
 
@@ -488,7 +522,9 @@ class ClientHandler(
     }
 
     fun sendStartPipeline() {
-        activePipelines.incrementAndGet()
+        val nextId = activePipelines.incrementAndGet()
+        currentSession = PipelineSession(nextId)
+        
         sendEvent("run-pipeline", buildJsonObject {
             put("name", "VACA ${config.uuid}")
             put("start_stage", "asr")
@@ -500,7 +536,6 @@ class ClientHandler(
                 put("channels", config.audioChannels)
             }
         })
-        lastResponseIsQuestion = false
         receivedSynthesize = false
         setPipelineTimeout(10)
     }
@@ -536,13 +571,15 @@ class ClientHandler(
         })
     }
 
+    // TODO: Standardize these to use top-level Wyoming events once the HA vaca component supports them.
+    // Currently, they must be wrapped in a "custom-event" for compatibility.
     fun sendStatus(data: JsonObject) {
         sendCustomEvent("status", data)
     }
 
+    // TODO: Move this wrapping into the info builder or a dedicated protocol layer.
     fun sendCapabilities() {
-        val capabilities = DeviceCapabilitiesManager.toJson(server.deviceInfo)
-        val data = capabilities["capabilities"] as? JsonObject ?: capabilities
+        val data = DeviceCapabilitiesManager.toJson(server.deviceInfo)
         sendCustomEvent("capabilities", data)
     }
 

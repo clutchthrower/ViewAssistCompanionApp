@@ -316,6 +316,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             addAction(BroadcastSender.SATELLITE_STOPPED)
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)
+            addAction(BroadcastSender.TOAST_MESSAGE)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(satelliteBroadcastReceiver, filter)
@@ -382,6 +383,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
                     if (config.doNotDisturb != dndEnabled) {
                         config.doNotDisturb = dndEnabled
+                    }
+                }
+                BroadcastSender.TOAST_MESSAGE -> {
+                    val msg = intent.getStringExtra("extra") ?: ""
+                    if (msg.isNotEmpty()) {
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -554,6 +561,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "refresh" -> webView.reload()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
+                "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
                 "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()

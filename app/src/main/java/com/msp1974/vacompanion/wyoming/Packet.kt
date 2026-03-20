@@ -8,7 +8,14 @@ class WyomingPacket (
     var payload: ByteArray = ByteArray(0)
 ) {
     fun getProp(prop: String): String {
-        return data[prop]?.jsonPrimitive?.contentOrNull ?: ""
+        // TODO: Implement a more robust parsing mechanism for complex JSON properties.
+        // Currently, we stringify objects/arrays to ensure they are readable by the consumer.
+        val value = data[prop] ?: return ""
+        return if (value is JsonPrimitive) {
+            value.contentOrNull ?: ""
+        } else {
+            value.toString()
+        }
     }
 
     fun toMap(): Map<String, Any> {

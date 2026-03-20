@@ -298,11 +298,18 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 val data = buildJsonObject {
                     put("timestamp", Date().toString())
                     putJsonObject("sensors") {
-                        data.map { (key, value) ->
-                            if (Helpers.isNumber(value.toString())) {
-                                put(key, value.toString().toFloat())
-                            } else {
-                                put(key, value.toString())
+                        // TODO: Use a formalized sensor mapping schema instead of manual type checking and casting.
+                        data.forEach { (key, value) ->
+                            when (value) {
+                                is Boolean -> put(key, value)
+                                is Number -> put(key, value.toFloat())
+                                else -> {
+                                    if (Helpers.isNumber(value.toString())) {
+                                        put(key, value.toString().toFloat())
+                                    } else {
+                                        put(key, value.toString())
+                                    }
+                                }
                             }
                         }
                     }
