@@ -5,10 +5,9 @@ import kotlinx.serialization.json.*
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.SocketException
-import java.nio.charset.Charset
 
 class WyomingMessenger(
-    private val client_id: Int,
+    private val clientId: Int,
     private val reader: DataInputStream,
     private val writer: DataOutputStream,
     private val version: String,
@@ -23,10 +22,10 @@ class WyomingMessenger(
         }
 
         if (packet.type != "ping" && packet.type != "pong" && packet.type != "audio-chunk") {
-            log.d("Sending to $client_id: ${packet.toMap()}")
+            log.d("Sending to $clientId: ${packet.toMap()}")
         }
         
-        val dataBytes = packet.data.toString().toByteArray(Charset.defaultCharset())
+        val dataBytes = packet.data.toString().toByteArray(Charsets.UTF_8)
         
         val header = buildJsonObject {
             put("type", packet.type)
@@ -42,7 +41,7 @@ class WyomingMessenger(
         val jsonLine = header.toString() + "\n"
 
         try {
-            writer.write(jsonLine.toByteArray(Charset.defaultCharset()))
+            writer.write(jsonLine.toByteArray(Charsets.UTF_8))
             if (dataBytes.isNotEmpty()) writer.write(dataBytes)
             if (packet.payload.isNotEmpty()) writer.write(packet.payload)
             writer.flush()
@@ -97,5 +96,4 @@ class WyomingMessenger(
         return null
     }
     
-    fun available(): Int = reader.available()
 }

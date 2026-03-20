@@ -7,23 +7,17 @@ import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.msp1974.vacompanion.audio.Alarm
-import com.msp1974.vacompanion.audio.PCMMediaPlayer
-import com.msp1974.vacompanion.audio.VAMediaPlayer
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.Logger
-import com.msp1974.vacompanion.utils.WakeWords
 import io.github.z4kn4fein.semver.toVersion
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.*
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.net.Socket
-import java.net.SocketException
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.*
@@ -56,7 +50,7 @@ class ClientHandler(
     private var pipelineStatus = PipelineStatus.INACTIVE
     
     private val connectionId = client.inetAddress.hostAddress ?: "unknown"
-    private val pingTimer: Timer? = null
+    private var pingTimer: Timer? = null
 
     private val mediaManager = WyomingMediaManager(context)
     private val actionHandler = WyomingActionHandler(context, config, mediaManager, log)
@@ -133,7 +127,7 @@ class ClientHandler(
                 val packet = readEvent() ?: continue
                 processEvent(packet)
             }
-        } catch (ex: EOFException) {
+        } catch (_: EOFException) {
             log.d("Connection $clientId closed by peer.")
         } catch (ex: Exception) {
             if (isRunning.get()) {
@@ -168,14 +162,13 @@ class ClientHandler(
     }
 
     private fun handleWakeWordDetected() {
+        mediaManager.updateVolumeDucking("all", true)
         if (pipelineStatus == PipelineStatus.LISTENING || activePipelines.get() > 0) {
             // Abort current pipeline cleanly
             releaseInputAudioStream()
             sendAudioStop()
             pendingWakeWord = true
-            updateVolumeDucking("all", true)
         } else {
-            updateVolumeDucking("all", true)
             sendWakeWordDetection()
             sendStartPipeline()
         }
@@ -298,7 +291,7 @@ class ClientHandler(
         when (event.type) {
             "pause-satellite" -> stopSatellite()
             "transcribe" -> {
-                updateVolumeDucking("all", true)
+                mediaManager.updateVolumeDucking("all", true)
                 requestInputAudioStream()
                 setPipelineTimeout(10)
             }
@@ -340,7 +333,7 @@ class ClientHandler(
         if (closePipeline()) {
             if (!expectingTTSResponse) {
                 cancelPipelineTimeout()
-                updateVolumeDucking("all", false)
+                mediaManager.updateVolumeDucking("all", false)
             }
             // If we ARE expecting TTS, the timeout is already running.
             // If it never arrives, handlePipelineTimeout will clean up.
@@ -489,7 +482,7 @@ class ClientHandler(
     fun sendWakeWordDetection() {
         sendEvent("detection", buildJsonObject {
             put("name", config.wakeWord)
-            put("timestamp", DateTimeFormatter.ISO_INSTANT.format(Instant.now()))
+            put("timestamp", isoNow())
             put("speaker", "")
         })
     }
@@ -514,7 +507,7 @@ class ClientHandler(
 
     fun sendAudioStop() {
         sendEvent("audio-stop", buildJsonObject {
-            put("timestamp", DateTimeFormatter.ISO_INSTANT.format(Instant.now()))
+            put("timestamp", isoNow())
         })
     }
 
@@ -531,7 +524,7 @@ class ClientHandler(
 
     fun sendSettingChange(name: String, value: Any) {
         sendCustomEvent("settings", buildJsonObject {
-            put("timestamp", DateTimeFormatter.ISO_INSTANT.format(Instant.now()))
+            put("timestamp", isoNow())
             putJsonObject("settings") {
                 when (value) {
                     is String -> put(name, value)
@@ -570,6 +563,7 @@ class ClientHandler(
     private fun readEvent(): WyomingPacket? = messenger.readEvent()
 
     companion object {
-        private val IGNORED_LOG_EVENTS = listOf("ping", "pong", "audio-chunk")
+        private val IGNORED_LOG_EVENTS = setOf("ping", "pong", "audio-chunk")
+        private fun isoNow(): String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
     }
 }

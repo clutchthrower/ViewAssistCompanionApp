@@ -39,12 +39,12 @@ class APPConfig(val context: Context) {
     private val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
     private val log = Logger()
     var eventBroadcaster: EventNotifier
-    private var prefListener: Unit
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        onSharedPreferenceChangedListener(prefs, key)
+    }
 
     init {
-        prefListener = sharedPrefs.registerOnSharedPreferenceChangeListener { prefs, key ->
-            onSharedPreferenceChangedListener(prefs, key)
-        }
+        sharedPrefs.registerOnSharedPreferenceChangeListener(prefListener)
         eventBroadcaster = EventNotifier()
     }
 

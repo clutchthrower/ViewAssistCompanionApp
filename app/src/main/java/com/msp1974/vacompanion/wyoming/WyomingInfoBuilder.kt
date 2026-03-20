@@ -11,7 +11,6 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
     @OptIn(ExperimentalSerializationApi::class)
     fun buildInfo(): JsonObject {
         val owwWakeWords = WakeWords(context).getWakeWords()
-        val mwwWakeWords = listOf("alexa", "hey_home_assistant", "hey_jarvis", "hey_luna", "hey_mycroft", "okay_computer", "okay_nabu")
         
         return buildJsonObject {
             put("version", config.version)
@@ -40,7 +39,7 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
                                 put("phrase", value.name)
                             })
                         }
-                        mwwWakeWords.forEach { name ->
+                        MWW_WAKE_WORDS.forEach { name ->
                             add(buildJsonObject {
                                 put("name", name)
                                 putJsonObject("attribution") {
@@ -76,5 +75,12 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
                 put("max_active_wake_words", 1)
             }
         }
+    }
+
+    companion object {
+        private val MWW_WAKE_WORDS = listOf(
+            "alexa", "hey_home_assistant", "hey_jarvis", "hey_luna",
+            "hey_mycroft", "okay_computer", "okay_nabu"
+        )
     }
 }
