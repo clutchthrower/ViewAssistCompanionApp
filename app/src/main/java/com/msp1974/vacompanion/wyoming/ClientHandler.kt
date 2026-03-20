@@ -33,98 +33,88 @@ class ClientHandler(
     private val server: WyomingTCPServer,
     private val client: Socket
 ) {
+    // Infrastructure & Resources
     private val log = Logger()
     private val config = APPConfig.getInstance(context)
     val clientId: Int = client.port
-    private val reader = DataInputStream(client.getInputStream())
-    private val writer = DataOutputStream(client.getOutputStream())
-    private val messenger = WyomingMessenger(clientId, reader, writer, config.version, log)
-    private val handler = Handler(Looper.getMainLooper())
-
-    private val isRunning = AtomicBoolean(true)
-    
-    @Volatile
-    private var satelliteStatus = SatelliteState.STOPPED
-    
-    @Volatile
-    private var pipelineStatus = PipelineStatus.INACTIVE
-    
     private val connectionId = client.inetAddress.hostAddress ?: "unknown"
-    private var pingTimer: Timer? = null
+    private val messenger = WyomingMessenger(
+        clientId, 
+        DataInputStream(client.getInputStream()), 
+        DataOutputStream(client.getOutputStream()), 
+        config.version, 
+        log
+    )
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "WyomingSender-$clientId")
+    }
+    private val broadcastExecutor = Executors.newSingleThreadExecutor()
 
+    // Helpers
     private val mediaManager = WyomingMediaManager(context)
     private val actionHandler = WyomingActionHandler(context, config, mediaManager, log)
     private val infoBuilder = WyomingInfoBuilder(context, config, server.deviceInfo)
 
-    @Volatile
-    private var receivedSynthesize = false
+    // Connection & Pipeline State
+    private val isRunning = AtomicBoolean(true)
+    @Volatile private var satelliteState = SatelliteState.STOPPED
+    @Volatile private var pipelineStage = PipelineStage.IDLE
     
-    private val activePipelines = AtomicInteger(0)
+    // Session State (Tracked per voice interaction)
+    private val sessionIdGenerator = AtomicInteger(0)
     private var currentSession: PipelineSession? = null
-    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "WyomingSender-$clientId")
-    }
+    @Volatile private var isExpectingTtsAudio = false
+    @Volatile private var isPendingInterruptCleanup = false
+    
+    private var pingTimer: Timer? = null
 
-    /**
-     * After we interrupt an in-flight pipeline, Home Assistant still applies
-     * `WAKE_WORD_COOLDOWN` (2s) per wake phrase for satellite STT. A second `detection` +
-     * `run-pipeline` right away triggers "Speech-to-text cancelled to avoid duplicate wake-up".
-     * We wait for `pipeline-ended`, then send `run-pipeline` only (no `detection`) so
-     * `wake_word_phrase` is null and that guard is skipped.
-     */
-    @Volatile
-    private var awaitingPipelineEndForWakeRestart = false
-    private val deferredWakeRestartTimeoutRunnable = Runnable {
-        if (!awaitingPipelineEndForWakeRestart) return@Runnable
-        awaitingPipelineEndForWakeRestart = false
-        log.d("Timeout waiting for pipeline-ended after wake interrupt; run-pipeline without detection")
-        sendStartPipeline(precedeWithWakeDetection = false)
-    }
-
-    private class PipelineSession(val id: Int) {
-        @Volatile var logicFinished = false
-        @Volatile var audioFinished = false
-        @Volatile var finalized = false
-        @Volatile var forceContinue = false
-    }
-
-    private fun isPipelineActive() = currentSession != null
-
+    // Runnables
     private val pipelineTimeoutRunnable = Runnable { handlePipelineTimeout() }
+    private val interruptCleanupTimeoutRunnable = Runnable {
+        if (!isPendingInterruptCleanup) return@Runnable
+        isPendingInterruptCleanup = false
+        log.d("Interrupt cleanup timeout; initiating pipeline without detection")
+        initiatePipeline(precedeWithWakeDetection = false)
+    }
 
-    private val broadcastExecutor = Executors.newSingleThreadExecutor()
+    // Broadcasts
+    private val intentFilter = IntentFilter().apply {
+        addAction(BroadcastSender.WAKE_WORD_DETECTED)
+        addAction(BroadcastSender.STOP_WORD_DETECTED)
+    }
 
     private val wakeWordReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (satelliteStatus != SatelliteState.RUNNING) return
+            if (satelliteState != SatelliteState.RUNNING) return
             
             broadcastExecutor.execute {
-                // First, handle any media/alarm stops if needed
-                if (mediaManager.pcmMediaPlayer.isPlaying) {
-                    mediaManager.pcmMediaPlayer.stop()
-                    mediaManager.updateVolumeDucking("music", false)
-                }
-                if (mediaManager.alarmPlayer.isSounding) {
-                    handleAlarmAction(false)
-                }
-
-                // Second, handle the specific intent action
-                when (intent.action) {
-                    BroadcastSender.WAKE_WORD_DETECTED -> {
-                        handleWakeWordDetected()
-                    }
-                    BroadcastSender.STOP_WORD_DETECTED -> {
-                        log.d("Stop word detected - resetting pipeline")
-                        resetPipeline()
-                    }
-                }
+                handleBroadcastIntent(intent)
             }
         }
     }
 
-    private val intentFilter = IntentFilter().apply {
-        addAction(BroadcastSender.WAKE_WORD_DETECTED)
-        addAction(BroadcastSender.STOP_WORD_DETECTED)
+    private fun isPipelineActive() = currentSession != null
+
+    private fun handleBroadcastIntent(intent: Intent) {
+        // Stop active media/alarms if needed when a wake word is detected
+        if (mediaManager.pcmMediaPlayer.isPlaying) {
+            mediaManager.pcmMediaPlayer.stop()
+            mediaManager.updateVolumeDucking("music", false)
+        }
+        if (mediaManager.alarmPlayer.isSounding) {
+            handleAlarmAction(false)
+        }
+
+        when (intent.action) {
+            BroadcastSender.WAKE_WORD_DETECTED -> {
+                onWakeWordDetected()
+            }
+            BroadcastSender.STOP_WORD_DETECTED -> {
+                log.d("Stop word detected - resetting pipeline")
+                resetCurrentPipeline()
+            }
+        }
     }
 
     /**
@@ -161,11 +151,11 @@ class ClientHandler(
         log.d("Stopping client $clientId connection handler")
         stopPingTimer()
 
-        if (satelliteStatus == SatelliteState.RUNNING) {
+        if (satelliteState == SatelliteState.RUNNING) {
             stopSatelliteInternal()
         }
 
-        cancelDeferredWakeRestart()
+        cancelInterruptCleanup()
 
 
         
@@ -184,37 +174,37 @@ class ClientHandler(
         log.w("$connectionId:$clientId disconnected. Remaining connections: $remaining")
     }
 
-    private fun handleWakeWordDetected() {
-        if (pipelineStatus != PipelineStatus.INACTIVE || isPipelineActive()) {
-            if (pipelineStatus == PipelineStatus.STREAMING || pipelineStatus == PipelineStatus.AWAITING_TTS) {
-                log.d("Interrupting response ($pipelineStatus) for new wake word")
-                resetPipeline()
-                scheduleDeferredWakeRestartAfterInterrupt()
+    // region Lifecycle & Connectivity
+
+    private fun onWakeWordDetected() {
+        if (pipelineStage != PipelineStage.IDLE || isPipelineActive()) {
+            if (pipelineStage == PipelineStage.STREAMING || pipelineStage == PipelineStage.AWAITING_TTS) {
+                log.d("Interrupting response ($pipelineStage) for new wake word")
+                resetCurrentPipeline()
+                scheduleInterruptCleanup()
                 return
             } else {
-                log.d("Ignoring redundant wake word detection ($pipelineStatus)")
+                log.d("Ignoring redundant wake word detection ($pipelineStage)")
                 return
             }
         }
 
-        cancelDeferredWakeRestart()
+        cancelInterruptCleanup()
         log.d("Wake word detected. Starting pipeline.")
         mediaManager.updateVolumeDucking("all", true)
-        sendStartPipeline(precedeWithWakeDetection = true)
+        initiatePipeline(precedeWithWakeDetection = true)
     }
 
-    private fun cancelDeferredWakeRestart() {
-        awaitingPipelineEndForWakeRestart = false
-        handler.removeCallbacks(deferredWakeRestartTimeoutRunnable)
+    private fun cancelInterruptCleanup() {
+        isPendingInterruptCleanup = false
+        mainHandler.removeCallbacks(interruptCleanupTimeoutRunnable)
     }
 
-    private fun scheduleDeferredWakeRestartAfterInterrupt() {
-        cancelDeferredWakeRestart()
-        awaitingPipelineEndForWakeRestart = true
-        handler.postDelayed(deferredWakeRestartTimeoutRunnable, 2_800L)
+    private fun scheduleInterruptCleanup() {
+        cancelInterruptCleanup()
+        isPendingInterruptCleanup = true
+        mainHandler.postDelayed(interruptCleanupTimeoutRunnable, 2_800L)
     }
-
-
 
     private fun startSatellite() {
         val currentVer = config.version.toVersion()
@@ -248,7 +238,7 @@ class ClientHandler(
                 }
                 
                 server.pipelineClient = this
-                satelliteStatus = SatelliteState.RUNNING
+                satelliteState = SatelliteState.RUNNING
                 server.satelliteStarted()
                 log.d("Satellite session started for $clientId")
             } else {
@@ -256,7 +246,7 @@ class ClientHandler(
                 stop()
             }
         }
-        config.isRunning = satelliteStatus == SatelliteState.RUNNING
+        config.isRunning = satelliteState == SatelliteState.RUNNING
     }
 
     private fun stopSatellite() {
@@ -270,7 +260,7 @@ class ClientHandler(
         
         synchronized(server) {
             if (server.pipelineClient == this) {
-                if (pipelineStatus == PipelineStatus.LISTENING) {
+                if (pipelineStage == PipelineStage.LISTENING) {
                     releaseInputAudioStream()
                 }
 
@@ -282,51 +272,55 @@ class ClientHandler(
                 config.homeAssistantConnectedIP = ""
             }
             
-            pipelineStatus = PipelineStatus.INACTIVE
-            satelliteStatus = SatelliteState.STOPPED
+            pipelineStage = PipelineStage.IDLE
+            satelliteState = SatelliteState.STOPPED
         }
         config.isRunning = false
     }
 
     private fun requestInputAudioStream() {
-        if (pipelineStatus != PipelineStatus.LISTENING) {
+        if (pipelineStage != PipelineStage.LISTENING) {
             log.d("Requesting audio input stream for $clientId")
-            pipelineStatus = PipelineStatus.LISTENING
+            pipelineStage = PipelineStage.LISTENING
             server.requestInputAudioStream()
         }
     }
 
     private fun releaseInputAudioStream() {
-        if (pipelineStatus != PipelineStatus.INACTIVE) {
+        if (pipelineStage != PipelineStage.IDLE) {
             log.d("Releasing audio input stream for $clientId")
-            pipelineStatus = PipelineStatus.INACTIVE
+            pipelineStage = PipelineStage.IDLE
             server.releaseInputAudioStream()
         }
     }
 
-    private fun processEvent(event: WyomingPacket) {
-        if (event.type !in IGNORED_LOG_EVENTS) {
-            log.d("Event received - $clientId: ${event.toMap()}")
+    // endregion
+
+    // region Event Processing
+
+    private fun processEvent(packet: WyomingPacket) {
+        if (packet.type !in IGNORED_LOG_EVENTS) {
+            log.d("Event received - $clientId: ${packet.toMap()}")
         }
 
         try {
-            when (event.type) {
+            when (packet.type) {
                 "ping" -> sendPong()
                 "describe" -> sendInfo()
                 "settings",
-                "custom-settings" -> processSettingsPacket(event)
+                "custom-settings" -> processSettingsPacket(packet)
                 "capabilities" -> sendCapabilities()
                 "run-satellite" -> startSatellite()
                 "action",
-                "custom-action" -> handleCustomAction(event)
-                "custom-event" -> handleCustomEvent(event)
+                "custom-action" -> handleCustomAction(packet)
+                "custom-event" -> handleCustomEvent(packet)
             }
 
-            if (satelliteStatus == SatelliteState.RUNNING) {
-                processSatelliteEvent(event)
+            if (satelliteState == SatelliteState.RUNNING) {
+                processSatelliteEvent(packet)
             }
         } catch (ex: Exception) {
-            log.e("Error processing event ${event.type}: $ex")
+            log.e("Error processing event ${packet.type}: $ex")
         }
     }
 
@@ -360,7 +354,7 @@ class ClientHandler(
             releaseInputAudioStream()
             if (event.getProp("text").lowercase().contains("never mind")) {
                 mediaManager.updateVolumeDucking("all", false)
-                resetPipeline()
+                resetCurrentPipeline()
             } else {
                 setPipelineTimeout(15) // Waiting for synthesis
             }
@@ -370,8 +364,8 @@ class ClientHandler(
     private fun handleSynthesize(event: WyomingPacket) {
         val session = currentSession
         if (session != null) {
-            pipelineStatus = PipelineStatus.AWAITING_TTS
-            receivedSynthesize = true
+            pipelineStage = PipelineStage.AWAITING_TTS
+            isExpectingTtsAudio = true
             
             // Check for continue_conversation flag in the synthesize data (HA might pass it here)
             findContinueConversation(event.data)?.let {
@@ -384,19 +378,19 @@ class ClientHandler(
     }
 
     private fun handlePipelineEnded() {
-        if (awaitingPipelineEndForWakeRestart) {
-            handler.removeCallbacks(deferredWakeRestartTimeoutRunnable)
-            awaitingPipelineEndForWakeRestart = false
-            log.d("pipeline-ended after wake interrupt; run-pipeline without detection (avoids HA duplicate-wake STT cancel)")
-            sendStartPipeline(precedeWithWakeDetection = false)
+        if (isPendingInterruptCleanup) {
+            mainHandler.removeCallbacks(interruptCleanupTimeoutRunnable)
+            isPendingInterruptCleanup = false
+            log.d("pipeline-ended after wake interrupt; initiating pipeline without detection (avoids HA duplicate-wake STT cancel)")
+            initiatePipeline(precedeWithWakeDetection = false)
             return
         }
 
         val session = currentSession ?: return
         session.logicFinished = true
 
-        if (pipelineStatus == PipelineStatus.AWAITING_TTS || pipelineStatus == PipelineStatus.STREAMING) {
-            log.d("Pipeline ended but TTS is in status $pipelineStatus. Waiting for audio to complete session ${session.id}.")
+        if (pipelineStage == PipelineStage.AWAITING_TTS || pipelineStage == PipelineStage.STREAMING) {
+            log.d("Pipeline ended but TTS is in stage $pipelineStage. Waiting for audio to complete session ${session.id}.")
             return
         }
 
@@ -405,22 +399,21 @@ class ClientHandler(
 
     private fun checkFinalizeSession(session: PipelineSession) {
         // A session is complete if logic ended AND (audio ended OR we never expected audio)
-        val audioDone = session.audioFinished || !receivedSynthesize
+        val audioDone = session.audioFinished || !isExpectingTtsAudio
         
         if (session.logicFinished && audioDone && !session.finalized) {
             session.finalized = true
             if (currentSession == session) {
-                activePipelines.decrementAndGet()
-                finalizePipeline()
+                cleanupPipeline()
                 currentSession = null
             }
         }
     }
 
-    private fun finalizePipeline() {
+    private fun cleanupPipeline() {
         cancelPipelineTimeout()
         mediaManager.updateVolumeDucking("all", false)
-        if (pipelineStatus != PipelineStatus.STREAMING) {
+        if (pipelineStage != PipelineStage.STREAMING) {
             releaseInputAudioStream()
         }
     }
@@ -428,7 +421,7 @@ class ClientHandler(
     private fun handleAudioStart() {
         if (isPipelineActive()) {
             cancelPipelineTimeout()
-            pipelineStatus = PipelineStatus.STREAMING
+            pipelineStage = PipelineStage.STREAMING
             mediaManager.updateVolumeDucking("all", true)
             mediaManager.pcmMediaPlayer.play()
         }
@@ -448,8 +441,8 @@ class ClientHandler(
                 sendEvent("played")
             }
             
-            pipelineStatus = PipelineStatus.INACTIVE
-            val hadSynthesize = receivedSynthesize
+            pipelineStage = PipelineStage.IDLE
+            val hadSynthesize = isExpectingTtsAudio
             val session = currentSession
             
             if (session != null) {
@@ -460,7 +453,7 @@ class ClientHandler(
                 
                 if (hadSynthesize && shouldContinue) {
                     log.d("Continuing conversation as requested by Home Assistant Turn result.")
-                    sendStartPipeline()
+                    initiatePipeline()
                 }
             }
         }
@@ -468,36 +461,32 @@ class ClientHandler(
 
     private fun handlePipelineError(event: WyomingPacket) {
         config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
-        resetPipeline()
+        resetCurrentPipeline()
     }
-
 
     private fun setPipelineTimeout(durationSeconds: Int) {
         cancelPipelineTimeout()
-        handler.postDelayed(pipelineTimeoutRunnable, durationSeconds * 1000L)
+        mainHandler.postDelayed(pipelineTimeoutRunnable, durationSeconds * 1000L)
     }
 
     private fun cancelPipelineTimeout() {
-        handler.removeCallbacks(pipelineTimeoutRunnable)
+        mainHandler.removeCallbacks(pipelineTimeoutRunnable)
     }
 
     private fun handlePipelineTimeout() {
         log.d("Pipeline timed out")
-        resetPipeline()
+        resetCurrentPipeline()
     }
 
-    private fun resetPipeline() {
-        // this must not be here or it will cancel when HA sends pipeline-ended after wake interrupt
-        // cancelDeferredWakeRestart()
-        val wasListening = pipelineStatus == PipelineStatus.LISTENING
+    private fun resetCurrentPipeline() {
+        val wasListening = pipelineStage == PipelineStage.LISTENING
         val sessionIdForAudioStop = currentSession?.id
-        activePipelines.set(0)
         currentSession = null
-        receivedSynthesize = false
+        isExpectingTtsAudio = false
         mediaManager.updateVolumeDucking("all", false)
         mediaManager.pcmMediaPlayer.stop()
         
-        if (pipelineStatus != PipelineStatus.INACTIVE) {
+        if (pipelineStage != PipelineStage.IDLE) {
             releaseInputAudioStream()
         }
         
@@ -505,9 +494,13 @@ class ClientHandler(
             sendAudioStop(sessionIdForAudioStop)
         }
         
-        pipelineStatus = PipelineStatus.INACTIVE
+        pipelineStage = PipelineStage.IDLE
         cancelPipelineTimeout()
     }
+
+    // endregion
+
+    // region Settings & Custom Commands
 
     private fun processSettingsPacket(packet: WyomingPacket) {
         val settingsStr = packet.getProp("settings").ifEmpty { packet.data.toString() }
@@ -561,6 +554,10 @@ class ClientHandler(
         sendSettingChange("alarm", enable)
     }
 
+    // endregion
+
+    // region Outbound Events
+
     private fun startPingTimer() {
         stopPingTimer()
         pingTimer = Timer().apply {
@@ -585,23 +582,16 @@ class ClientHandler(
         sendEvent("info", infoBuilder.buildInfo())
     }
 
-    fun sendWakeWordDetection() {
-        sendEvent("detection", buildJsonObject {
-            put("name", config.wakeWord)
-            put("timestamp", isoNow())
-            put("speaker", "")
-        })
-    }
-
     /**
-     * Starts a pipeline run. When [precedeWithWakeDetection] is true, sends `detection` and `run-pipeline` back-to-back
-     * in one [sendExecutor] task so no other outbound event (e.g. ping) is interleaved between them on the wire.
+     * Initiates a pipeline run. 
+     * @param precedeWithWakeDetection when true, sends `detection` and `run-pipeline` back-to-back
+     * in one [sendExecutor] task to ensure no other events interleave on the wire.
      */
-    fun sendStartPipeline(precedeWithWakeDetection: Boolean = false) {
-        if (pipelineStatus == PipelineStatus.LISTENING) {
+    fun initiatePipeline(precedeWithWakeDetection: Boolean = false) {
+        if (pipelineStage == PipelineStage.LISTENING) {
             releaseInputAudioStream()
         }
-        val nextId = activePipelines.incrementAndGet()
+        val nextId = sessionIdGenerator.incrementAndGet()
 
         val runPipelinePacket = WyomingPacket(
             "run-pipeline",
@@ -629,13 +619,13 @@ class ClientHandler(
                     },
                     sessionId = nextId
                 )
-                messenger.sendEvent(detectionPacket, pipelineStatus, nextId)
+                messenger.sendEvent(detectionPacket, pipelineStage, nextId)
             }
-            messenger.sendEvent(runPipelinePacket.copy(sessionId = nextId), pipelineStatus, nextId)
+            messenger.sendEvent(runPipelinePacket.copy(sessionId = nextId), pipelineStage, nextId)
         }
 
         currentSession = PipelineSession(nextId)
-        receivedSynthesize = false
+        isExpectingTtsAudio = false
         setPipelineTimeout(15)
     }
 
@@ -650,7 +640,7 @@ class ClientHandler(
     }
 
     fun sendAudio(audio: ByteArray) {
-        if (pipelineStatus != PipelineStatus.LISTENING) return
+        if (pipelineStage != PipelineStage.LISTENING) return
 
         val data = buildJsonObject {
             put("rate", config.sampleRate)
@@ -704,7 +694,7 @@ class ClientHandler(
         sendExecutor.execute {
             runCatching {
                 val event = WyomingPacket(type, data, payload, sessionId = enqueueSessionId)
-                messenger.sendEvent(event, this.pipelineStatus, currentSession?.id)
+                messenger.sendEvent(event, this.pipelineStage, currentSession?.id)
             }.onFailure {
                 if (isRunning.get()) {
                     log.e("Failed to send event $type: ${it.message}")
@@ -714,6 +704,8 @@ class ClientHandler(
     }
 
     private fun readEvent(): WyomingPacket? = messenger.readEvent()
+
+    // endregion
 
     companion object {
         private val IGNORED_LOG_EVENTS = setOf("ping", "pong", "audio-chunk")
