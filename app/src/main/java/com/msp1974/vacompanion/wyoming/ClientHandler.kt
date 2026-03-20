@@ -58,8 +58,6 @@ class ClientHandler(
 
     @Volatile
     private var receivedSynthesize = false
-    @Volatile
-    private var pendingWakeWord = false
     
     private val activePipelines = AtomicInteger(0)
     private var currentSession: PipelineSession? = null
@@ -167,16 +165,17 @@ class ClientHandler(
     }
 
     private fun handleWakeWordDetected() {
+        log.d("Wake word detected. Current status: $pipelineStatus, active: ${isPipelineActive()}")
         mediaManager.updateVolumeDucking("all", true)
-        if (pipelineStatus == PipelineStatus.LISTENING || isPipelineActive()) {
-            // Abort current pipeline cleanly
-            releaseInputAudioStream()
-            sendAudioStop()
-            pendingWakeWord = true
-        } else {
-            sendWakeWordDetection()
-            sendStartPipeline()
+        
+        if (pipelineStatus != PipelineStatus.INACTIVE || isPipelineActive()) {
+            log.d("Interrupting current pipeline status $pipelineStatus for new wake word")
+            resetPipeline()
         }
+        
+        mediaManager.updateVolumeDucking("all", true)
+        sendWakeWordDetection()
+        sendStartPipeline()
     }
 
     private fun startSatellite() {
@@ -375,7 +374,6 @@ class ClientHandler(
         if (pipelineStatus != PipelineStatus.STREAMING) {
             releaseInputAudioStream()
         }
-        processPendingWakeWord()
     }
 
     private fun handleAudioStart() {
@@ -422,17 +420,8 @@ class ClientHandler(
     private fun handlePipelineError(event: WyomingPacket) {
         config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
         resetPipeline()
-        processPendingWakeWord()
     }
 
-    private fun processPendingWakeWord() {
-        if (pendingWakeWord) {
-            pendingWakeWord = false
-            mediaManager.updateVolumeDucking("all", true)
-            sendWakeWordDetection()
-            sendStartPipeline()
-        }
-    }
 
     private fun setPipelineTimeout(durationSeconds: Int) {
         cancelPipelineTimeout()
@@ -446,7 +435,6 @@ class ClientHandler(
     private fun handlePipelineTimeout() {
         log.d("Pipeline timed out")
         resetPipeline()
-        processPendingWakeWord()
     }
 
     private fun resetPipeline() {
