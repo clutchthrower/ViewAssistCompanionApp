@@ -39,6 +39,7 @@ class VoiceSession(
     @Volatile var finalized = false
     @Volatile var forceContinue = false
     @Volatile var isExpectingTtsAudio = false
+    @Volatile private var needsContinue = false
 
     private var isAudioStreamRequested = false
 
@@ -158,8 +159,8 @@ class VoiceSession(
         checkFinalize()
         
         if (hadSynthesize && forceContinue) {
-            log.d("Continuing conversation as requested by server (Session $id)")
-            callback.notifyContinueConversation()
+            log.d("Requested conversation continuation (Session $id)")
+            needsContinue = true
         }
     }
 
@@ -198,5 +199,8 @@ class VoiceSession(
 
     private fun finalizeAndCleanup() {
         stop(false)
+        if (needsContinue) {
+            callback.notifyContinueConversation()
+        }
     }
 }

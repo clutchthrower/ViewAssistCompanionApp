@@ -152,4 +152,50 @@ class SessionSerializationTest {
             mediaHandler.updateVolumeDucking("all", false)
         }
     }
+    @Test
+    fun `test continue conversation after tts`() {
+        clientHandler.onWakeWordDetected()
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("transcript", buildJsonObject { put("text", "hello") }))
+        
+        // Server sends synthesize and tells us to continue
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {
+            putJsonObject("intent_output") {
+                put("continue_conversation", true)
+            }
+        }))
+
+        // Finish audio (this currently triggers continue via handleAudioStop)
+        clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
+        
+        // Fulfill logic finished requirement to trigger finalization
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        
+        // Should start a NEW session (ID 2 or 3 depending on sequence) without wake detection
+        verify { 
+            messenger.sendEvent(match { it.type == "run-pipeline" }) 
+        }
+        // Verify no detection event was sent FOR THE NEW SESSION
+        // (Detection for session 1 was already verified)
+        verify(exactly = 0) {
+            messenger.sendEvent(match { it.type == "detection" && it.sessionId != 1 })
+        }
+    }
+
+    @Test
+    fun `test session remains serialized when first logic ends quickly`() {
+        clientHandler.onWakeWordDetected() // Session 1
+        
+        // Rapid fire second detection
+        clientHandler.onWakeWordDetected() // Session 1 interrupted, Session 2 pending
+        
+        // Session 1 ends logic immediately
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}, sessionId = 1))
+        
+        // Session 2 should start only after pipeline-ended
+        verify { 
+            messenger.sendEvent(match { it.type == "run-pipeline" && it.sessionId == 2 })
+        }
+    }
 }
