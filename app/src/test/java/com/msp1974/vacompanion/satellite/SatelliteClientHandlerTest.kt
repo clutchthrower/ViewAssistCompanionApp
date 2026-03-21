@@ -140,6 +140,8 @@ class SatelliteClientHandlerTest {
     @Test
     fun `test handleAudioStart plays audio`() {
         clientHandler.onWakeWordDetected()
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         
         verify {
@@ -151,6 +153,8 @@ class SatelliteClientHandlerTest {
     @Test
     fun `test handleAudioChunk writes audio to player`() {
         clientHandler.onWakeWordDetected()
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         every { mediaHandler.pcmMediaPlayer.isPlaying } returns true
         
@@ -163,6 +167,8 @@ class SatelliteClientHandlerTest {
     @Test
     fun `test handleAudioStop sends played event`() {
         clientHandler.onWakeWordDetected()
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         every { mediaHandler.pcmMediaPlayer.isPlaying } returns true
         
@@ -176,6 +182,7 @@ class SatelliteClientHandlerTest {
     @Test
     fun `test handleTranscript with never mind resets pipeline`() {
         clientHandler.onWakeWordDetected()
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("transcript", buildJsonObject { put("text", "never mind") }))
         
         verify {
@@ -196,7 +203,9 @@ class SatelliteClientHandlerTest {
             }
         }
         
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("synthesize", synthesizeData))
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
         
         verify(timeout = 1000) {
@@ -205,29 +214,31 @@ class SatelliteClientHandlerTest {
     }
 
     @Test
-    fun `test handleAudioStop releases input audio stream if logic ended`() {
+    fun `test onSessionFinalized is only called after both logic and audio are done`() {
         clientHandler.onWakeWordDetected()
         
-        // Advance to LISTENING
+        // 1. Enter LISTENING and then jump to synthesise (releases input stream)
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {
+            putJsonObject("intent_output") { put("continue_conversation", true) }
+        }))
+        verify(exactly = 1) { server.releaseInputAudioStream() }
         
-        // Simulate synthesize to make audioDone = false until audioStop
-        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
-        
-        // Advance to STREAMING
-        clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
-        
-        // Mark logic as finished
+        // 2. Mark logic finished
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
         
-        // Preliminary checks
-        verify(exactly = 0) { server.releaseInputAudioStream() }
+        // Verify it didn't initiate continuation yet (because audio isn't done)
+        verify(timeout = 1000, exactly = 1) { messenger.sendEvent(match { it.type == "run-pipeline" }) } // only the first run-pipeline
         
-        // Act
+        // 3. Mark audio finished
+        clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
         
-        // Verify
-        verify(exactly = 1) { server.releaseInputAudioStream() }
+        // 4. Verification: onSessionFinalized should now have been triggered,
+        // which since needsContinue=true, will initiate a new conversation.
+        verify(timeout = 1000) { 
+            messenger.sendEvent(match { it.type == "run-pipeline" && it.sessionId == 2 }) 
+        }
     }
 
     @Test
@@ -237,6 +248,7 @@ class SatelliteClientHandlerTest {
         clearMocks(messenger)
         
         // Simulate synthesizer stage to reach AWAITING_TTS
+        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         
         // Interrupt

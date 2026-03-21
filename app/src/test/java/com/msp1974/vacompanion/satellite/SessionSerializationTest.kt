@@ -80,7 +80,7 @@ class SessionSerializationTest {
     fun `test second wake word detection waits for first session to end on server`() {
         // First detection
         clientHandler.onWakeWordDetected()
-        verify(timeout = 1000) { 
+        verify { 
             messenger.sendEvent(match { it.type == "detection" }) 
             messenger.sendEvent(match { it.type == "run-pipeline" })
         }
@@ -110,7 +110,7 @@ class SessionSerializationTest {
     @Test
     fun `test sendRawEvent filters audio chunks when not listening`() {
         clientHandler.onWakeWordDetected()
-        verify(timeout = 1000) { messenger.sendEvent(match { it.type == "run-pipeline" }) }
+        verify { messenger.sendEvent(match { it.type == "run-pipeline" }) }
         clearMocks(messenger)
         
         // Stage should be IDLE right now (waiting for transcribe or audio-start)
@@ -122,7 +122,7 @@ class SessionSerializationTest {
     @Test
     fun `test sendRawEvent drops packets for inactive sessions`() {
         clientHandler.onWakeWordDetected()
-        verify(timeout = 1000) { messenger.sendEvent(match { it.type == "run-pipeline" }) }
+        verify { messenger.sendEvent(match { it.type == "run-pipeline" }) }
         clearMocks(messenger)
         
         // Active session ID is likely 1 since it's the first wake word
@@ -134,7 +134,7 @@ class SessionSerializationTest {
     @Test
     fun `test never mind transcript interrupts session and finalizes`() {
         clientHandler.onWakeWordDetected()
-        verify(timeout = 1000) { 
+        verify { 
             messenger.sendEvent(match { it.type == "run-pipeline" }) 
         }
         
@@ -165,21 +165,25 @@ class SessionSerializationTest {
             }
         }))
 
-        // Finish audio (this currently triggers continue via handleAudioStop)
+        // Clear mocks from session 1 verification
+        clearMocks(messenger)
+
+        // Fulfill logic finished requirement early (exercise ordering bug)
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+
+        // Finish audio (this triggers continue via finalizeAndCleanup)
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
         
-        // Fulfill logic finished requirement to trigger finalization
-        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
-        
-        // Should start a NEW session (ID 2 or 3 depending on sequence) without wake detection
+        // Should start a NEW session (ID 2) without wake detection
+        // We check for run-pipeline with sessionId 2.
         verify { 
-            messenger.sendEvent(match { it.type == "run-pipeline" }) 
+            messenger.sendEvent(match { it.type == "run-pipeline" && it.sessionId == 2 }) 
         }
+
         // Verify no detection event was sent FOR THE NEW SESSION
-        // (Detection for session 1 was already verified)
         verify(exactly = 0) {
-            messenger.sendEvent(match { it.type == "detection" && it.sessionId != 1 })
+            messenger.sendEvent(match { it.type == "detection" && it.sessionId == 2 })
         }
     }
 

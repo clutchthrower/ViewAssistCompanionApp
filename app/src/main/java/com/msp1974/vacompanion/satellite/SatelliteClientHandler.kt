@@ -26,6 +26,7 @@ import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Concrete implementation of a Wyoming client using TCP transport.
@@ -63,9 +64,16 @@ class SatelliteClientHandler(
     // State Management
     private val isRunning = AtomicBoolean(true)
     @Volatile private var satelliteState = SatelliteState.STOPPED
+    private val missedPongs = AtomicInteger(0)
     
     private val sessionCoordinator: SessionCoordinator
     
+    // Health Tracking
+    private companion object {
+        const val PING_INTERVAL_MS = 2000L
+        const val MAX_MISSED_PONGS = 3
+    }
+
     init {
         sessionCoordinator = SessionCoordinator(log, object : VoiceSession.Callback {
             override fun sendEvent(packet: WyomingPacket) = this@SatelliteClientHandler.sendRawEvent(packet)
@@ -116,6 +124,9 @@ class SatelliteClientHandler(
             
             override fun onSessionFinalized(session: VoiceSession) {
                 this@SatelliteClientHandler.sessionCoordinator.onSessionFinalized(session)
+                if (session.needsContinue) {
+                    notifyContinueConversation()
+                }
             }
         })
     }
@@ -152,6 +163,7 @@ class SatelliteClientHandler(
         try {
             while (isRunning.get() && !client.isClosed) {
                 val packet = messenger.readEvent() ?: continue
+                missedPongs.set(0) // Connection is alive
                 processPacket(packet)
             }
         } catch (_: EOFException) {
@@ -206,6 +218,7 @@ class SatelliteClientHandler(
 
                 handleAlarmAction(false)
                 mediaHandler.musicPlayer.stop()
+                sessionCoordinator.reset()
 
                 val oldClient = server.pipelineClient as? SatelliteClientHandler
                 if (oldClient != null && oldClient != this) {
@@ -256,6 +269,7 @@ class SatelliteClientHandler(
         try {
             when (packet.type) {
                 "ping" -> sendPong()
+                "pong" -> { /* Already handled by read loop reset */ }
                 "describe" -> sendInfo()
                 "capabilities" -> sendCapabilities()
                 "run-satellite" -> startSatellite()
@@ -353,9 +367,15 @@ class SatelliteClientHandler(
         pingTimer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
+                    if (missedPongs.get() >= MAX_MISSED_PONGS) {
+                        log.w("Client $clientId: No response for ${MAX_MISSED_PONGS * PING_INTERVAL_MS / 1000}s. Terminating connection.")
+                        stop()
+                        return
+                    }
+                    missedPongs.incrementAndGet()
                     sendRawEvent(WyomingPacket("ping", buildJsonObject { put("text", "") }))
                 }
-            }, 0, 2000)
+            }, 0, PING_INTERVAL_MS)
         }
     }
 

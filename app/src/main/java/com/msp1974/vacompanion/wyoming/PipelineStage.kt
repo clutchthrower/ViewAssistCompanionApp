@@ -7,6 +7,7 @@ package com.msp1974.vacompanion.wyoming
 enum class PipelineStage { 
     IDLE, 
     LISTENING, 
-    STREAMING, 
-    AWAITING_TTS 
+    PROCESSING,
+    AWAITING_TTS,
+    STREAMING
 }

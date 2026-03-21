@@ -6,6 +6,7 @@ import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.wyoming.WyomingClient
 import java.net.ServerSocket
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -32,7 +33,11 @@ class SatelliteServer(
     private var serverSocket: ServerSocket? = null
     
     @Volatile var pipelineClient: WyomingClient? = null
+    private val clientThreadPool = Executors.newFixedThreadPool(10)
     private val deviceInfo: DeviceCapabilitiesData = DeviceCapabilitiesManager(context).getDeviceInfo()
+    
+    // Audio Stream state (Atomic for thread safety between multiple client handlers)
+    private val isAudioRequested = AtomicBoolean(false)
 
     fun getDeviceInfo() = deviceInfo
 
@@ -44,7 +49,7 @@ class SatelliteServer(
                 while (isRunning.get()) {
                     val clientSocket = socket.accept()
                     if (isRunning.get()) {
-                        thread(name = "SatelliteClient-${clientSocket.port}") {
+                        clientThreadPool.execute {
                             SatelliteClientHandler(
                                 context,
                                 this,
@@ -67,7 +72,22 @@ class SatelliteServer(
         log.d("Stopping Satellite Server")
         isRunning.set(false)
         pipelineClient?.stop()
+        
         runCatching { serverSocket?.close() }
+        
+        // Graceful shutdown: don't interrupt active handlers mid-flight immediately
+        clientThreadPool.shutdown()
+        runCatching {
+            if (!clientThreadPool.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.w("Satellite client threads did not shut down in time, forcing...")
+                clientThreadPool.shutdownNow()
+            }
+        }
+        
+        // Safety: release audio if anything was pending
+        if (isAudioRequested.getAndSet(false)) {
+            callback.onReleaseInputAudioStream()
+        }
     }
 
     // region Delegates to active client
@@ -82,8 +102,21 @@ class SatelliteServer(
 
     fun onSatelliteStarted() = callback.onSatelliteStarted()
     fun onSatelliteStopped() = callback.onSatelliteStopped()
-    fun requestInputAudioStream() = callback.onRequestInputAudioStream()
-    fun releaseInputAudioStream() = callback.onReleaseInputAudioStream()
+    fun requestInputAudioStream() {
+        // Use AtomicBoolean to ensure we only call callback once per state transition
+        // and check pipelineClient within the same synchronized or volatile context.
+        // We only allow audio capture if a client is actually connected.
+        if (pipelineClient == null) return
+        if (!isAudioRequested.getAndSet(true)) {
+            callback.onRequestInputAudioStream()
+        }
+    }
+
+    fun releaseInputAudioStream() {
+        if (isAudioRequested.getAndSet(false)) {
+            callback.onReleaseInputAudioStream()
+        }
+    }
 
     // endregion
 }

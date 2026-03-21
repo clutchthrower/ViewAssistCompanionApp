@@ -39,7 +39,8 @@ class VoiceSession(
     @Volatile var finalized = false
     @Volatile var forceContinue = false
     @Volatile var isExpectingTtsAudio = false
-    @Volatile private var needsContinue = false
+    @Volatile var needsContinue = false
+        private set
 
     private var isAudioStreamRequested = false
 
@@ -95,16 +96,23 @@ class VoiceSession(
     }
 
     private fun handleTranscribe() {
-        callback.onUpdateVolumeDucking("all", true)
-        if (stage != PipelineStage.LISTENING) {
-            stage = PipelineStage.LISTENING
-            isAudioStreamRequested = true
-            callback.onRequestAudioStream()
+        if (stage != PipelineStage.IDLE) {
+            log.d("Ignoring unexpected transcribe in stage $stage (Session $id)")
+            return
         }
+        callback.onUpdateVolumeDucking("all", true)
+        stage = PipelineStage.LISTENING
+        isAudioStreamRequested = true
+        callback.onRequestAudioStream()
         callback.setPipelineTimeout(10)
     }
 
     private fun handleTranscript(packet: WyomingPacket) {
+        if (stage != PipelineStage.LISTENING) {
+            log.d("Ignoring unexpected transcript in stage $stage (Session $id)")
+            return
+        }
+        
         if (isAudioStreamRequested) {
             isAudioStreamRequested = false
             callback.onReleaseAudioStream()
@@ -113,15 +121,28 @@ class VoiceSession(
         if (packet.getProp("text").lowercase().contains("never mind")) {
             callback.onUpdateVolumeDucking("all", false)
             stop(sendAudioStop = true)
-            stage = PipelineStage.IDLE // Done listening
             callback.onSessionFinalized(this)
         } else {
-            stage = PipelineStage.IDLE // Done listening
-            callback.setPipelineTimeout(15) // Waiting for synthesis
+            stage = PipelineStage.PROCESSING // Waiting for synthesis or pipeline-ended
+            callback.setPipelineTimeout(15)
         }
     }
 
     private fun handleSynthesize(packet: WyomingPacket) {
+        // Allow transitions from LISTENING as some Wyoming servers might send synthesis 
+        // before the client has received the final transcript (VAD).
+        if (stage != PipelineStage.PROCESSING && stage != PipelineStage.LISTENING) {
+             log.d("Ignoring unexpected synthesize in stage $stage (Session $id)")
+             return
+        }
+        
+        if (stage == PipelineStage.LISTENING) {
+            // Force release audio stream if we jumped directly to synthesis phase
+            if (isAudioStreamRequested) {
+                isAudioStreamRequested = false
+                callback.onReleaseAudioStream()
+            }
+        }
         stage = PipelineStage.AWAITING_TTS
         isExpectingTtsAudio = true
         
@@ -136,6 +157,10 @@ class VoiceSession(
     }
 
     private fun handleAudioStart() {
+        if (stage != PipelineStage.AWAITING_TTS) {
+            log.d("Ignoring unexpected audio-start in stage $stage (Session $id)")
+            return
+        }
         callback.cancelPipelineTimeout()
         stage = PipelineStage.STREAMING
         callback.onUpdateVolumeDucking("all", true)
@@ -149,30 +174,41 @@ class VoiceSession(
     }
 
     private fun handleAudioStop() {
+        if (stage != PipelineStage.AWAITING_TTS && stage != PipelineStage.STREAMING) {
+            log.d("Ignoring unexpected audio-stop in stage $stage (Session $id)")
+            return
+        }
+
         if (stage == PipelineStage.STREAMING) {
             callback.sendEvent(WyomingPacket("played", buildJsonObject {}))
         }
         
         val hadSynthesize = isExpectingTtsAudio
-        audioFinished = true
-        
-        checkFinalize()
-        
         if (hadSynthesize && forceContinue) {
             log.d("Requested conversation continuation (Session $id)")
             needsContinue = true
         }
+        
+        audioFinished = true
+        checkFinalize()
     }
 
     private fun handlePipelineEnded(packet: WyomingPacket) {
-        logicFinished = true
-
-        if (stage == PipelineStage.AWAITING_TTS || stage == PipelineStage.STREAMING) {
-            log.d("Pipeline ended but TTS is in stage $stage. Waiting for audio to complete (Session $id).")
+        if (stage == PipelineStage.IDLE || stage == PipelineStage.LISTENING) {
+            log.d("Ignoring stale pipeline-ended in stage $stage (Session $id)")
             return
         }
+        
+        logicFinished = true
 
-        checkFinalize()
+        if (stage == PipelineStage.PROCESSING || stage == PipelineStage.AWAITING_TTS || stage == PipelineStage.STREAMING) {
+            log.d("Pipeline ended. Waiting for audio completion if needed (Session $id, stage: $stage).")
+            if (stage == PipelineStage.PROCESSING) {
+                 // If we were processing and it ended without synthesize, we're done.
+                 checkFinalize()
+            }
+            return
+        }
     }
 
     private fun handlePipelineError(packet: WyomingPacket) {
@@ -183,7 +219,7 @@ class VoiceSession(
              val toastMessage = text.ifEmpty { "Error: $code" }
              callback.notifyRecognitionError(code, toastMessage)
         }
-        
+        needsContinue = false
         stop()
         callback.onSessionFinalized(this)
     }
@@ -199,8 +235,5 @@ class VoiceSession(
 
     private fun finalizeAndCleanup() {
         stop(false)
-        if (needsContinue) {
-            callback.notifyContinueConversation()
-        }
     }
 }
