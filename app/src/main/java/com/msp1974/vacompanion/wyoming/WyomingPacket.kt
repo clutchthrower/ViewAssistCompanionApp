@@ -1,6 +1,8 @@
 package com.msp1974.vacompanion.wyoming
 
 import kotlinx.serialization.json.*
+import java.time.format.DateTimeFormatter
+import java.time.Instant
 
 data class WyomingPacket (
     val type: String,
@@ -21,5 +23,10 @@ data class WyomingPacket (
 
     fun toMap(): Map<String, Any> {
         return mapOf("type" to type, "data" to data)
+    }
+
+    companion object {
+        private val isoFormatter = DateTimeFormatter.ISO_INSTANT
+        fun isoNow(): String = isoFormatter.format(Instant.now())
     }
 }

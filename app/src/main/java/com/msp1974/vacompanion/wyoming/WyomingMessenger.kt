@@ -6,6 +6,10 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.SocketException
 
+/**
+ * Low-level messenger for the Wyoming protocol.
+ * Responsible for packet framing, JSON serialization, and raw data transmission.
+ */
 class WyomingMessenger(
     private val clientId: Int,
     private val reader: DataInputStream,
@@ -15,22 +19,12 @@ class WyomingMessenger(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Sends a Wyoming packet to the peer.
+     * Performs JSON framing and optional payload serialization.
+     */
     @Synchronized
-    fun sendEvent(packet: WyomingPacket, pipelineStage: PipelineStage, currentSessionId: Int? = null) {
-        // Drop only when there is an *active* session and the packet belongs to an older one.
-        // If currentSessionId is null (e.g. pipeline torn down), still send tagged cleanup (audio-stop, etc.).
-        if (currentSessionId != null &&
-            packet.sessionId != null &&
-            packet.sessionId != currentSessionId
-        ) {
-            log.d("Dropping packet ${packet.type} for session ${packet.sessionId} (current session: $currentSessionId)")
-            return
-        }
-        
-        if (packet.type == "audio-chunk" && pipelineStage != PipelineStage.LISTENING) {
-            return
-        }
-
+    fun sendEvent(packet: WyomingPacket) {
         if (packet.type != "ping" && packet.type != "pong" && packet.type != "audio-chunk") {
             log.d("Sending to $clientId: ${packet.toMap()}")
         }
@@ -74,6 +68,10 @@ class WyomingMessenger(
         }
     }
 
+    /**
+     * Reads the next Wyoming packet from the peer.
+     * Blocks until a full packet is available or connection is lost.
+     */
     fun readEvent(): WyomingPacket? {
         try {
             val jsonString = StringBuilder()
@@ -99,7 +97,7 @@ class WyomingMessenger(
                 header["data"]?.jsonObject ?: buildJsonObject {}
             }
 
-            // Extract session_id if present in data, falling back to top level header for older protocol versions if any.
+            // Support both session_id and sessionId for compatibility
             val sessionId = data["session_id"]?.jsonPrimitive?.intOrNull 
                 ?: data["sessionId"]?.jsonPrimitive?.intOrNull
                 ?: header["session_id"]?.jsonPrimitive?.intOrNull
@@ -120,5 +118,4 @@ class WyomingMessenger(
         }
         return null
     }
-    
 }

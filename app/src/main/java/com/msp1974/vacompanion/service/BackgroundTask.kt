@@ -9,7 +9,10 @@ import android.media.AudioManager
 import android.net.wifi.WifiManager
 import androidx.annotation.RequiresPermission
 import com.msp1974.vacompanion.R
-import com.msp1974.vacompanion.wyoming.Zeroconf
+import com.msp1974.vacompanion.satellite.SatelliteCallback
+import com.msp1974.vacompanion.satellite.SatelliteServer
+import com.msp1974.vacompanion.satellite.SatelliteZeroconf
+import com.msp1974.vacompanion.wyoming.WyomingPacket
 import com.msp1974.vacompanion.audio.SoundClipPlayer
 import com.msp1974.vacompanion.audio.AudioManager as AudManager
 import com.msp1974.vacompanion.audio.MicrophoneInput
@@ -27,8 +30,6 @@ import com.msp1974.vacompanion.utils.VolumeObserver
 import com.msp1974.vacompanion.wakeword.WakeWordEngine
 import com.msp1974.vacompanion.wakeword.WakeWordEngineModel
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
-import com.msp1974.vacompanion.wyoming.WyomingCallback
-import com.msp1974.vacompanion.wyoming.WyomingTCPServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -81,14 +82,14 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private val historyBufferLookbackMs = 200L
     private var lastWakeDetectionTimestamp = 0L
 
-    val zeroConf: Zeroconf = Zeroconf(context)
+    val zeroConf: SatelliteZeroconf = SatelliteZeroconf(context)
 
     var engine: WakeWordEngine? = null
     var engineStarted: Boolean = false
     var audioRoute: AudioRouteOption = AudioRouteOption.NONE
     private var sensorRunner: Sensors? = null
     lateinit var assetManager: AssetManager
-    lateinit var server: WyomingTCPServer
+    lateinit var server: SatelliteServer
     private lateinit var volumeObserver: VolumeObserver
     private val soundClipPlayer = SoundClipPlayer(context)
 
@@ -113,8 +114,8 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             }
         }
 
-        // Start wyoming server
-        server = WyomingTCPServer(context, config.serverPort, object : WyomingCallback {
+        // Start satellite server
+        server = SatelliteServer(context, config.serverPort, object : SatelliteCallback {
             @RequiresPermission(Manifest.permission.RECORD_AUDIO)
             override fun onSatelliteStarted() {
                 Timber.i("Background Task - Connection detected")

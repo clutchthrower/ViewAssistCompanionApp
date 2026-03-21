@@ -33,7 +33,7 @@ internal class AudioManager(context: Context) {
  * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
  * to eliminate buffering latency on first playback and ensure immediate audio feedback.
  */
-internal class SoundClipPlayer(private val context: Context) {
+class SoundClipPlayer(private val context: Context) {
     private val players = mutableMapOf<Int, ExoPlayer>()
 
     fun prepare(resId: Int) {
