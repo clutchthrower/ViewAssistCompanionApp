@@ -1,0 +1,37 @@
+package com.msp1974.vacompanion.wyoming
+
+import android.content.Context
+import com.msp1974.vacompanion.audio.Alarm
+import com.msp1974.vacompanion.audio.PCMMediaPlayer
+import com.msp1974.vacompanion.audio.VAMediaPlayer
+
+class WyomingMediaManager(private val context: Context) {
+    val alarmPlayer = Alarm(context)
+    val pcmMediaPlayer = PCMMediaPlayer(context)
+    val musicPlayer = VAMediaPlayer.getInstance(context)
+
+    fun release() {
+        if (pcmMediaPlayer.isPlaying) pcmMediaPlayer.stop()
+        if (alarmPlayer.isSounding) alarmPlayer.stopAlarm()
+        musicPlayer.stop()
+    }
+
+    fun stopAll() {
+        if (pcmMediaPlayer.isPlaying) pcmMediaPlayer.stop()
+        musicPlayer.stop()
+        alarmPlayer.stopAlarm()
+    }
+
+    fun updateVolumeDucking(type: String, active: Boolean) {
+        val duckAlarm = type == "alarm" || type == "all"
+        val duckMusic = type == "music" || type == "all"
+
+        if (active) {
+            if (duckAlarm) alarmPlayer.duckVolume()
+            if (duckMusic) musicPlayer.duckVolume()
+        } else {
+            if (duckAlarm) alarmPlayer.unDuckVolume()
+            if (duckMusic && !alarmPlayer.isSounding) musicPlayer.unDuckVolume()
+        }
+    }
+}

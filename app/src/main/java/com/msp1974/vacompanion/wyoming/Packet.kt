@@ -1,26 +1,25 @@
 package com.msp1974.vacompanion.wyoming
 
-import org.json.JSONObject
+import kotlinx.serialization.json.*
 
-class WyomingPacket (event: JSONObject) {
-    val type: String = event.getString("type")
-    private var data: JSONObject = event.getJSONObject("data")
-    var payload: ByteArray = ByteArray(0)
-
+data class WyomingPacket (
+    val type: String,
+    val data: JsonObject = buildJsonObject {},
+    var payload: ByteArray = ByteArray(0),
+    val sessionId: Int? = null
+) {
     fun getProp(prop: String): String {
-        return data.getString(prop)
+        // TODO: Implement a more robust parsing mechanism for complex JSON properties.
+        // Currently, we stringify objects/arrays to ensure they are readable by the consumer.
+        val value = data[prop] ?: return ""
+        return if (value is JsonPrimitive) {
+            value.contentOrNull ?: ""
+        } else {
+            value.toString()
+        }
     }
 
-    fun setProp(prop: String, value: String) {
-        data.put(prop, value)
+    fun toMap(): Map<String, Any> {
+        return mapOf("type" to type, "data" to data)
     }
-
-    fun getDataLength(): Int {
-        return data.toString().length
-    }
-
-    fun toMap(): MutableMap<String, Any> {
-        return mutableMapOf("type" to type, "data" to data)
-    }
-
 }

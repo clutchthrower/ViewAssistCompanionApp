@@ -12,6 +12,7 @@ import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.wyoming.Zeroconf
 import com.msp1974.vacompanion.audio.SoundClipPlayer
 import com.msp1974.vacompanion.audio.AudioManager as AudManager
+import com.msp1974.vacompanion.audio.MicrophoneInput
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.sensors.SensorUpdatesCallback
 import com.msp1974.vacompanion.sensors.Sensors
@@ -39,6 +40,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import timber.log.Timber
 import java.util.Date
+import java.util.LinkedList
 import kotlin.collections.set
 import kotlin.concurrent.thread
 
@@ -59,6 +61,25 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     private val detectionCooldowns = mutableMapOf<String, Long>()
     private val detectionCooldownMs: Long = 2000L
+    private val msPerChunk: Long = (MicrophoneInput.BUFFER_SIZE_IN_SHORTS.toLong() * 1000L) / MicrophoneInput.DEFAULT_SAMPLE_RATE_IN_HZ.toLong()
+
+    private val audioHistoryBuffer = LinkedList<WakeWordEngineProvider.AudioResult.Audio>()
+    private val historyBufferTargetDurationMs = 1000L
+    private val historyBufferMaxSize = (historyBufferTargetDurationMs / msPerChunk).toInt()    
+    /**
+     * Lookback window (in ms) to include when flushing the history buffer to the server.
+     * This 200ms margin ensures we capture the transition between the wake-word and the 
+     * user's command. This is crucial because wake-word detections (especially with 
+     * sliding windows) often trigger on an average of the last several frames (N-2, N-1, N).
+     * By looking back, we avoid clipping the end of the wake-word or the start of 
+     * the intent and provide the STT engine with enough acoustic context for a clean start.
+     * 
+     * Note: This value is an initial estimate and requires empirical testing across different 
+     * Android devices. Feedback from actual STT results is necessary to determine if this 
+     * value is appropriate or if it results in excessive "pre-speech" noise.
+     */
+    private val historyBufferLookbackMs = 200L
+    private var lastWakeDetectionTimestamp = 0L
 
     val zeroConf: Zeroconf = Zeroconf(context)
 
@@ -69,6 +90,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     lateinit var assetManager: AssetManager
     lateinit var server: WyomingTCPServer
     private lateinit var volumeObserver: VolumeObserver
+    private val soundClipPlayer = SoundClipPlayer(context)
 
     private var motionTask = CameraBackgroundTask(context)
 
@@ -100,6 +122,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 volumeObserver.register()
                 startSensors(context)
                 runWakeWordDetection()
+                warmUpAudioResources()
                 BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_STARTED)
                 zeroConf.unregisterService()
             }
@@ -118,8 +141,22 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             }
 
             override fun onRequestInputAudioStream() {
-                Timber.i("Streaming audio to server")
                 audioRoute = AudioRouteOption.STREAM
+                var sentChunks = 0
+
+                // Flush history buffer, but only audio from the last wake-up onwards (with a small lookback)
+                synchronized(audioHistoryBuffer) {
+                    while (audioHistoryBuffer.isNotEmpty()) {
+                        val chunk = audioHistoryBuffer.removeFirst()
+                        // Keep only chunks that follow the detection point (minus lookback margin for safety)
+                        if (chunk.timestamp >= (lastWakeDetectionTimestamp - historyBufferLookbackMs)) {
+                            server.sendAudio(chunk.audio.toByteArray())
+                            sentChunks++
+                        }
+                    }
+                }
+
+                Timber.i("Streaming audio to server. Sent $sentChunks chunks from history (${sentChunks * msPerChunk}ms).")
                 engine?.setStreaming(true)
             }
 
@@ -167,7 +204,23 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
-            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
+            "continueConversationStart" -> {
+                if (config.wakeWordSound != "none") {
+                    try {
+                        val resId = context.resources.getIdentifier(
+                            config.wakeWordSound,
+                            "raw",
+                            context.packageName
+                        )
+                        if (resId != 0) {
+                            soundClipPlayer.play(resId)
+                        }
+                    } catch (e: Exception) {
+                        Timber.e("Error playing continue listening sound: ${e.message.toString()}")
+                    }
+                }
+            }
+            "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
                     try {
                         if (wakeWordJob != null && wakeWordJob!!.isActive) {
@@ -185,25 +238,23 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     wakeWordId =  config.wakeWord,
                     wakeWord = config.wakeWord,
                     detected =  true,
-                    score =  config.wakeWordThreshold
+                    score =  config.wakeWordThreshold,
+                    timestamp = System.currentTimeMillis()
                 ),
                 false
                 )
             }
             "recognitionError" -> {
-                when (event.newValue) {
-                    "duplicate_wake_up_detected" -> {}
-                    else -> {
-                        if (config.wakeWordSound != "none") {
-                            try {
-                                SoundClipPlayer(
-                                    context,
-                                    R.raw.error
-                                ).play()
-                            } catch (e: Exception) {
-                                Timber.e("Error playing wake word sound: ${e.message.toString()}")
-                            }
-                        }
+                val errorText = event.oldValue as? String ?: ""
+                if (errorText.isNotEmpty()) {
+                    config.eventBroadcaster.notifyEvent(Event("showToastError", "", errorText))
+                }
+
+                if (config.wakeWordSound != "none") {
+                    try {
+                        soundClipPlayer.play(R.raw.error)
+                    } catch (e: Exception) {
+                        Timber.e("Error playing wake word sound: ${e.message.toString()}")
                     }
                 }
                 audioRoute = AudioRouteOption.DETECT
@@ -298,11 +349,18 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 val data = buildJsonObject {
                     put("timestamp", Date().toString())
                     putJsonObject("sensors") {
-                        data.map { (key, value) ->
-                            if (Helpers.isNumber(value.toString())) {
-                                put(key, value.toString().toFloat())
-                            } else {
-                                put(key, value.toString())
+                        // TODO: Use a formalized sensor mapping schema instead of manual type checking and casting.
+                        data.forEach { (key, value) ->
+                            when (value) {
+                                is Boolean -> put(key, value)
+                                is Number -> put(key, value.toFloat())
+                                else -> {
+                                    if (Helpers.isNumber(value.toString())) {
+                                        put(key, value.toString().toFloat())
+                                    } else {
+                                        put(key, value.toString())
+                                    }
+                                }
                             }
                         }
                     }
@@ -330,6 +388,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             engine?.setActiveStopWords(listOf("stop"))
 
             sendDiagnostics(0f, 0f)
+            warmUpAudioResources()
 
             engine!!.start().collect {
                 when (it) {
@@ -355,12 +414,29 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                                     context,
                                     BroadcastSender.STOP_WORD_DETECTED
                                 )
+                                try {
+                                    soundClipPlayer.play(R.raw.stop_word)
+                                } catch (e: Exception) {
+                                    Timber.e("Error playing stop word sound: ${e.message.toString()}")
+                                }
                             }
                         }
                     }
 
                     is WakeWordEngineProvider.AudioResult.Audio -> {
-                        server.sendAudio(it.audio.toByteArray())
+                        if (it.audio.size() > 0) {
+                            if (engine!!.isStreaming()) {
+                                server.sendAudio(it.audio.toByteArray())
+                            } else {
+                                // Add to history buffer even if not streaming
+                                synchronized(audioHistoryBuffer) {
+                                    audioHistoryBuffer.addLast(it)
+                                    if (audioHistoryBuffer.size > historyBufferMaxSize) {
+                                        audioHistoryBuffer.removeFirst()
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     is WakeWordEngineProvider.AudioResult.AudioLevel -> {
@@ -398,6 +474,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     private fun wakeWordDetected(detection: WakeWordEngineProvider.WakeWordDetection, isStreaming: Boolean) {
         Timber.i("${detection.wakeWord} wake word detected at ${detection.score}, threshold is ${config.wakeWordThreshold}")
+        lastWakeDetectionTimestamp = detection.timestamp
         firebase.logEvent(
             FirebaseManager.WAKE_WORD_DETECTED, mapOf(
                 "wake_word" to config.wakeWord,
@@ -412,14 +489,13 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
         if (!isStreaming && config.wakeWordSound != "none") {
             try {
-                SoundClipPlayer(
-                    context,
+                soundClipPlayer.play(
                     context.resources.getIdentifier(
                         config.wakeWordSound,
                         "raw",
                         context.packageName
                     )
-                ).play()
+                )
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
             }
@@ -493,6 +569,17 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         }
     }
 
+    private fun warmUpAudioResources() {
+        soundClipPlayer.prepare(R.raw.error)
+        soundClipPlayer.prepare(R.raw.stop_word)
+        if (config.wakeWordSound != "none") {
+            val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+    }
+
 
     fun shutdown() {
         Timber.i("Shutting down")
@@ -504,6 +591,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         motionTask.stopCamera()
         terminateWakeWordDetection()
         stopSensors()
+        soundClipPlayer.release()
         server.stop()
 
     }

@@ -322,6 +322,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             addAction(BroadcastSender.SATELLITE_STOPPED)
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)
+            addAction(BroadcastSender.TOAST_MESSAGE)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(satelliteBroadcastReceiver, filter)
@@ -388,6 +389,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
                     if (config.doNotDisturb != dndEnabled) {
                         config.doNotDisturb = dndEnabled
+                    }
+                }
+                BroadcastSender.TOAST_MESSAGE -> {
+                    val msg = intent.getStringExtra("extra") ?: ""
+                    if (msg.isNotEmpty()) {
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -560,6 +567,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "refresh" -> webView.reload()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
+                "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
                 "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()
@@ -569,6 +577,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     this,
                     event.newValue as String,
                     Toast.LENGTH_SHORT
+                ).show()
+                "showToastError" -> Toast.makeText(
+                    this,
+                    "⚠️ ${event.newValue}",
+                    Toast.LENGTH_LONG
                 ).show()
                 else -> consumed = false
             }
@@ -630,17 +643,21 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         screen.wakeScreen()
 
-        if (viewModel.vacaState.value.screenBlank && initialised) {
+        screenOffInProgress = false
+        if (initialised) {
             setScreenSaver(false)
         }
     }
 
     fun screenSleep() {
+        if (screen.isScreenOff()) {
+            Timber.d("Screen already off, ignoring sleep request")
+            return
+        }
         Timber.d("Sleeping screen")
         if (permissions.isDeviceAdmin()) {
             screen.setPartialWakeLock()
             lockScreen()
-            setScreenSaver(false)
             return
         }
 
@@ -682,7 +699,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
         config.screenOn = false
         screenOffInProgress = false
-        setScreenSaver(false)
         log.d("Screen off")
     }
 

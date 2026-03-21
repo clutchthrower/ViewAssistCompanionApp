@@ -34,6 +34,8 @@ protobufKotlin = "4.34.0"
 appcompat = "1.7.1"
 material = "1.13.0"
 lifecycleService = "2.10.0"
+mockk = "1.13.13"
+
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -81,6 +83,9 @@ protobuf-kotlin = { module = "com.google.protobuf:protobuf-kotlin-lite", version
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "mockk" }
+
 
 
 [plugins]
