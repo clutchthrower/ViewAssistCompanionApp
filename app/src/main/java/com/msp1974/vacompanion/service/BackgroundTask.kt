@@ -191,6 +191,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 )
             }
             "recognitionError" -> {
+                val errorText = event.oldValue as? String ?: ""
+                if (errorText.isNotEmpty()) {
+                    config.eventBroadcaster.notifyEvent(Event("showToastError", "", errorText))
+                }
+
                 if (config.wakeWordSound != "none") {
                     try {
                         SoundClipPlayer(

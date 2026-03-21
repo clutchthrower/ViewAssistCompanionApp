@@ -572,6 +572,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     event.newValue as String,
                     Toast.LENGTH_SHORT
                 ).show()
+                "showToastError" -> Toast.makeText(
+                    this,
+                    "⚠️ ${event.newValue}",
+                    Toast.LENGTH_LONG
+                ).show()
                 else -> consumed = false
             }
             if (consumed) {

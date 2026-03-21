@@ -428,6 +428,7 @@ class ClientHandler(
 
     private fun handlePipelineError(event: WyomingPacket) {
         val code = event.getProp("code")
+        val text = event.getProp("text")
         
         val isDuplicateWakeUp = code == "duplicate_wake_up_detected"
                                 
@@ -435,7 +436,9 @@ class ClientHandler(
             log.d("Speech-to-text cancelled to avoid duplicate wake-up. Handled gracefully.")
         }
         
-        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", code))
+        val toastMessage = if (text.isNotEmpty()) text else "Error: $code"
+        config.eventBroadcaster.notifyEvent(Event("recognitionError", toastMessage, code))
+        
         resetCurrentPipeline()
     }
 
