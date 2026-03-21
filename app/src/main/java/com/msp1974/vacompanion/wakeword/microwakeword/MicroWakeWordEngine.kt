@@ -77,6 +77,7 @@ open class MicroWakeWordEngine (
                     }
 
                     val audio = microphoneInput.readBytes()
+                    val frameTimestamp = System.currentTimeMillis()
 
                     if (config.diagnosticsEnabled) {
                         val audioByteString = ByteString.copyFrom(audio)
@@ -84,12 +85,9 @@ open class MicroWakeWordEngine (
                         emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audioByteString.toByteArray())))
                     }
 
-
-
-                    if (isStreaming) {
-                        emit(AudioResult.Audio(ByteString.copyFrom(audio)))
-                        audio.rewind()
-                    }
+                    // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer
+                    emit(AudioResult.Audio(ByteString.copyFrom(audio), timestamp = frameTimestamp))
+                    audio.rewind()
 
                     // Always run audio through the models, even if not currently streaming, to keep
                     // their internal state up to date
@@ -97,9 +95,9 @@ open class MicroWakeWordEngine (
                     for (detection in detections) {
                         if (detection.score > 0.1f) {
                             if (detection.wakeWordId in wakeWords) {
-                                emit(AudioResult.WakeDetected(detection))
+                                emit(AudioResult.WakeDetected(detection.copy(timestamp = frameTimestamp)))
                             } else if (detection.wakeWordId in stopWords) {
-                                emit(AudioResult.StopDetected(detection))
+                                emit(AudioResult.StopDetected(detection.copy(timestamp = frameTimestamp)))
                             }
                         }
                     }
