@@ -66,6 +66,9 @@ android {
             optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
         }
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 
@@ -105,6 +108,8 @@ dependencies {
     implementation(libs.protobuf.kotlin)
     implementation(libs.androidx.lifecycle.service)
     testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    androidTestImplementation(libs.mockk.android)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

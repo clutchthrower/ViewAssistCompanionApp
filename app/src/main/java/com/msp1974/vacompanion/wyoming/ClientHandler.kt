@@ -31,30 +31,28 @@ import java.util.concurrent.atomic.AtomicInteger
 class ClientHandler(
     private val context: Context,
     private val server: WyomingTCPServer,
-    private val client: Socket
+    private val client: Socket,
+    private val log: Logger = Logger(),
+    private val config: APPConfig = APPConfig.getInstance(context),
+    private val messenger: WyomingMessenger = WyomingMessenger(
+        client.port,
+        DataInputStream(client.getInputStream()),
+        DataOutputStream(client.getOutputStream()),
+        config.version,
+        log
+    ),
+    private val mediaManager: WyomingMediaManager = WyomingMediaManager(context),
+    private val actionHandler: WyomingActionHandler = WyomingActionHandler(context, config, mediaManager, log),
+    private val infoBuilder: WyomingInfoBuilder = WyomingInfoBuilder(context, config, server.deviceInfo),
+    private val mainHandler: Handler = Handler(Looper.getMainLooper())
 ) {
     // Infrastructure & Resources
-    private val log = Logger()
-    private val config = APPConfig.getInstance(context)
     val clientId: Int = client.port
     private val connectionId = client.inetAddress.hostAddress ?: "unknown"
-    private val messenger = WyomingMessenger(
-        clientId, 
-        DataInputStream(client.getInputStream()), 
-        DataOutputStream(client.getOutputStream()), 
-        config.version, 
-        log
-    )
-    private val mainHandler = Handler(Looper.getMainLooper())
     private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "WyomingSender-$clientId")
     }
     private val broadcastExecutor = Executors.newSingleThreadExecutor()
-
-    // Helpers
-    private val mediaManager = WyomingMediaManager(context)
-    private val actionHandler = WyomingActionHandler(context, config, mediaManager, log)
-    private val infoBuilder = WyomingInfoBuilder(context, config, server.deviceInfo)
 
     // Connection & Pipeline State
     private val isRunning = AtomicBoolean(true)
@@ -176,7 +174,7 @@ class ClientHandler(
 
     // region Lifecycle & Connectivity
 
-    private fun onWakeWordDetected() {
+    internal fun onWakeWordDetected() {
         if (pipelineStage != PipelineStage.IDLE || isPipelineActive()) {
             if (pipelineStage == PipelineStage.STREAMING || pipelineStage == PipelineStage.AWAITING_TTS) {
                 log.d("Interrupting response ($pipelineStage) for new wake word")
@@ -206,7 +204,7 @@ class ClientHandler(
         mainHandler.postDelayed(interruptCleanupTimeoutRunnable, 2_800L)
     }
 
-    private fun startSatellite() {
+    internal fun startSatellite() {
         val currentVer = config.version.toVersion()
         val minVer = config.minRequiredApkVersion.toVersion()
         
@@ -254,7 +252,7 @@ class ClientHandler(
         isRunning.set(false)
     }
 
-    private fun stopSatelliteInternal() {
+    internal fun stopSatelliteInternal() {
         log.d("Stopping satellite service for $clientId")
         LocalBroadcastManager.getInstance(context).unregisterReceiver(wakeWordReceiver)
         
@@ -298,7 +296,7 @@ class ClientHandler(
 
     // region Event Processing
 
-    private fun processEvent(packet: WyomingPacket) {
+    internal fun processEvent(packet: WyomingPacket) {
         if (packet.type !in IGNORED_LOG_EVENTS) {
             log.d("Event received - $clientId: ${packet.toMap()}")
         }
@@ -418,7 +416,7 @@ class ClientHandler(
         }
     }
 
-    private fun handleAudioStart() {
+    internal fun handleAudioStart() {
         if (isPipelineActive()) {
             cancelPipelineTimeout()
             pipelineStage = PipelineStage.STREAMING
@@ -427,13 +425,13 @@ class ClientHandler(
         }
     }
 
-    private fun handleAudioChunk(event: WyomingPacket) {
+    internal fun handleAudioChunk(event: WyomingPacket) {
         if (isPipelineActive() && mediaManager.pcmMediaPlayer.isPlaying) {
             mediaManager.pcmMediaPlayer.writeAudio(event.payload)
         }
     }
 
-    private fun handleAudioStop() {
+    internal fun handleAudioStop() {
         if (isPipelineActive()) {
             if (mediaManager.pcmMediaPlayer.isPlaying) {
                 // We send 'played' but we DON'T stop immediately, to allow draining.
