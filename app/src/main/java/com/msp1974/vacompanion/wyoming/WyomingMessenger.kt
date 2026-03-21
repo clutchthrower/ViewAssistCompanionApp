@@ -35,7 +35,17 @@ class WyomingMessenger(
             log.d("Sending to $clientId: ${packet.toMap()}")
         }
         
-        val dataBytes = packet.data.toString().toByteArray(Charsets.UTF_8)
+        // Ensure session_id is included in the data sent to the client if present in the packet.
+        val outboundData = if (packet.sessionId != null && packet.data["session_id"] == null) {
+            buildJsonObject {
+                packet.data.forEach { (k, v) -> put(k, v) }
+                put("session_id", packet.sessionId)
+            }
+        } else {
+            packet.data
+        }
+
+        val dataBytes = outboundData.toString().toByteArray(Charsets.UTF_8)
         
         val header = buildJsonObject {
             put("type", packet.type)
@@ -89,7 +99,12 @@ class WyomingMessenger(
                 header["data"]?.jsonObject ?: buildJsonObject {}
             }
 
-            val packet = WyomingPacket(type, data)
+            // Extract session_id if present in data, falling back to top level header for older protocol versions if any.
+            val sessionId = data["session_id"]?.jsonPrimitive?.intOrNull 
+                ?: data["sessionId"]?.jsonPrimitive?.intOrNull
+                ?: header["session_id"]?.jsonPrimitive?.intOrNull
+
+            val packet = WyomingPacket(type, data, sessionId = sessionId)
             val payloadLength = header["payload_length"]?.jsonPrimitive?.intOrNull ?: 0
             if (payloadLength != 0) {
                 val payloadBytes = ByteArray(payloadLength)

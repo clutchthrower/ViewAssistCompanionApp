@@ -63,6 +63,7 @@ class ClientHandler(
     private val sessionIdGenerator = AtomicInteger(0)
     private var currentSession: PipelineSession? = null
     @Volatile private var isExpectingTtsAudio = false
+    private val isRestartPending = AtomicBoolean(false)
     
     private var pingTimer: Timer? = null
 
@@ -168,12 +169,10 @@ class ClientHandler(
 
     internal fun onWakeWordDetected() {
         if (pipelineStage != PipelineStage.IDLE || isPipelineActive()) {
-            if (pipelineStage == PipelineStage.STREAMING || pipelineStage == PipelineStage.AWAITING_TTS) {
-                log.d("Interrupting response ($pipelineStage) for new wake word")
-                resetCurrentPipeline()
-                initiatePipeline()
-                return
-            }
+            log.d("Interrupting response ($pipelineStage / session ${currentSession?.id}) for new wake word. Waiting for server cleanup.")
+            isRestartPending.set(true)
+            resetCurrentPipeline()
+            return
         }
 
         log.d("Wake word detected. Starting pipeline.")
@@ -300,10 +299,16 @@ class ClientHandler(
     }
 
     private fun processSatelliteEvent(event: WyomingPacket) {
+        val session = currentSession
+        if (event.sessionId != null && session != null && event.sessionId != session.id) {
+            log.d("Ignoring event ${event.type} — session ID mismatch (packet: ${event.sessionId}, current: ${session.id})")
+            return
+        }
+
         when (event.type) {
             "pause-satellite" -> stopSatellite()
             "transcribe" -> {
-                if (currentSession == null) {
+                if (session == null) {
                     log.d("Ignoring transcribe — no pipeline session (stale or very early)")
                     return
                 }
@@ -315,7 +320,7 @@ class ClientHandler(
             "voice-stopped" -> setPipelineTimeout(15)
             "transcript" -> handleTranscript(event)
             "synthesize" -> handleSynthesize(event)
-            "pipeline-ended" -> handlePipelineEnded()
+            "pipeline-ended" -> handlePipelineEnded(event)
             "audio-start" -> handleAudioStart()
             "audio-chunk" -> handleAudioChunk(event)
             "audio-stop" -> handleAudioStop()
@@ -352,8 +357,23 @@ class ClientHandler(
         }
     }
 
-    private fun handlePipelineEnded() {
-        val session = currentSession ?: return
+    private fun handlePipelineEnded(event: WyomingPacket) {
+        val session = currentSession
+
+        if (session == null) {
+            if (isRestartPending.compareAndSet(true, false)) {
+                log.d("Received pipeline-ended for previous session. Starting pending pipeline.")
+                initiatePipeline()
+            }
+            return
+        }
+
+        // Session awareness: ignore mismatched session IDs if provided by server.
+        if (event.sessionId != null && event.sessionId != session.id) {
+            log.d("Ignoring pipeline-ended for old session ${event.sessionId} (current: ${session.id})")
+            return
+        }
+
         session.logicFinished = true
 
         if (pipelineStage == PipelineStage.AWAITING_TTS || pipelineStage == PipelineStage.STREAMING) {
@@ -362,6 +382,12 @@ class ClientHandler(
         }
 
         checkFinalizeSession(session)
+
+        // If we were waiting for this session to end to restart, do it now.
+        if (currentSession == null && isRestartPending.compareAndSet(true, false)) {
+            log.d("Session finalized. Starting pending pipeline.")
+            initiatePipeline()
+        }
     }
 
     private fun checkFinalizeSession(session: PipelineSession) {
