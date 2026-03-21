@@ -100,8 +100,7 @@ class SessionSerializationTest {
         // Stage should be IDLE right now (waiting for transcribe or audio-start)
         clientHandler.sendRawEvent(WyomingPacket("audio-chunk", buildJsonObject {}, byteArrayOf(1, 2)))
         
-        Thread.sleep(100)
-        verify(exactly = 0) { messenger.sendEvent(any()) }
+        verify(timeout = 1000, exactly = 0) { messenger.sendEvent(any()) }
     }
 
     @Test
@@ -114,8 +113,7 @@ class SessionSerializationTest {
         val staleSessionId = 99
         clientHandler.sendRawEvent(WyomingPacket("info", buildJsonObject {}, sessionId = staleSessionId))
         
-        Thread.sleep(100)
-        verify(exactly = 0) { messenger.sendEvent(any()) }
+        verify(timeout = 1000, exactly = 0) { messenger.sendEvent(any()) }
     }
     @Test
     fun `test never mind transcript interrupts session and finalizes`() {

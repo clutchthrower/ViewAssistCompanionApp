@@ -16,8 +16,7 @@ class SessionCoordinator(
     private val sessionIdGenerator = AtomicInteger(0)
     
     @GuardedBy("this")
-    var currentSession: VoiceSession? = null
-        private set
+    private var currentSession: VoiceSession? = null
     
     @GuardedBy("this")
     private var pendingSession: VoiceSession? = null
@@ -25,82 +24,115 @@ class SessionCoordinator(
     @GuardedBy("this")
     private var isRestartPending = false
 
+    val activeSession: VoiceSession?
+        @Synchronized get() = currentSession
+
     @Synchronized
     fun isActive() = currentSession != null || isRestartPending
 
-    @Synchronized
     fun reset() {
-        currentSession?.stop()
-        currentSession = null
-        pendingSession = null
-        isRestartPending = false
-    }
-
-    @Synchronized
-    fun onWakeWordDetected() {
-        if (currentSession != null) {
-            log.d("Interrupting current session ${currentSession?.id}. Waiting for server cleanup.")
-            
-            // Queue the new session
-            val nextId = sessionIdGenerator.incrementAndGet()
-            pendingSession = VoiceSession(nextId, log, callback)
-            isRestartPending = true
-            
-            // Stop the current session (sends audio-stop if listening)
-            currentSession?.stop()
-            currentSession = null // Nullify immediately to stop routing packets
-            
-            return
-        }
-
-        // Normal start
-        val nextId = sessionIdGenerator.incrementAndGet()
-        currentSession = VoiceSession(nextId, log, callback)
-        currentSession?.initiate()
-    }
-
-    @Synchronized
-    fun processPacket(packet: WyomingPacket) {
-        val session = currentSession
-        
-        // Serialization logic: handle late cleanup events when no session is active.
-        if (session == null) {
-            if (packet.type == "pipeline-ended") {
-                if (isRestartPending) {
-                    isRestartPending = false
-                    log.d("Cleanup received. Starting pending session ${pendingSession?.id}.")
-                    currentSession = pendingSession
-                    pendingSession = null
-                    currentSession?.initiate()
-                }
-            } else if (packet.type == "transcribe" || packet.type == "transcript" || packet.type == "audio-start") {
-                log.d("Ignoring stale event ${packet.type} during serialization wait.")
-            }
-            return
-        }
-
-        // Protocol de-confliction: route by sessionId if available.
-        if (packet.sessionId != null && packet.sessionId != session.id) {
-             log.d("Ignoring event ${packet.type} for old session ${packet.sessionId} (current: ${session.id})")
-             return
-        }
-
-        session.processPacket(packet)
-    }
-
-    @Synchronized
-    fun onSessionFinalized(session: VoiceSession) {
-        if (currentSession == session) {
+        val sessionToStop = synchronized(this) {
+            val toStop = currentSession
             currentSession = null
-            
-            // Start pending if session ended naturally (e.g. after TTS completion)
-            if (isRestartPending) {
-                 isRestartPending = false
-                 log.d("Session finalized. Resuming pending session ${pendingSession?.id}.")
-                 currentSession = pendingSession
-                 pendingSession = null
-                 currentSession?.initiate()
+            pendingSession = null
+            isRestartPending = false
+            toStop
+        }
+        sessionToStop?.stop()
+    }
+
+    fun onWakeWordDetected() {
+        val sessionToStop = synchronized(this) {
+            if (currentSession != null) {
+                val nextId = sessionIdGenerator.incrementAndGet()
+                pendingSession = VoiceSession(nextId, log, callback)
+                isRestartPending = true
+                
+                val toStop = currentSession
+                currentSession = null
+                toStop
+            } else {
+                null
             }
+        }
+        
+        if (sessionToStop != null) {
+            log.d("Interrupting current session ${sessionToStop.id}. Waiting for server cleanup.")
+            sessionToStop.stop()
+            return
+        }
+
+        val sessionToStart = synchronized(this) {
+            val nextId = sessionIdGenerator.incrementAndGet()
+            currentSession = VoiceSession(nextId, log, callback)
+            currentSession
+        }
+        sessionToStart?.initiate()
+    }
+
+    fun startContinueConversation() {
+        val sessionToStart = synchronized(this) {
+            if (currentSession != null || isRestartPending) return@synchronized null
+            val nextId = sessionIdGenerator.incrementAndGet()
+            currentSession = VoiceSession(nextId, log, callback)
+            currentSession
+        }
+        sessionToStart?.initiate(isContinue = true)
+    }
+
+    fun processPacket(packet: WyomingPacket) {
+        val (sessionToProcess, sessionToInitiate) = synchronized(this) {
+            val session = currentSession
+            
+            if (session == null) {
+                if (packet.type == "pipeline-ended") {
+                    if (isRestartPending) {
+                        isRestartPending = false
+                        currentSession = pendingSession
+                        pendingSession = null
+                        Pair<VoiceSession?, VoiceSession?>(null, currentSession)
+                    } else Pair<VoiceSession?, VoiceSession?>(null, null)
+                } else {
+                    if (packet.type == "transcribe" || packet.type == "transcript" || packet.type == "audio-start") {
+                        log.d("Ignoring stale event ${packet.type} during serialization wait.")
+                    }
+                    Pair<VoiceSession?, VoiceSession?>(null, null)
+                }
+            } else {
+                if (packet.sessionId != null && packet.sessionId != session.id) {
+                     log.d("Ignoring event ${packet.type} for old session ${packet.sessionId} (current: ${session.id})")
+                     Pair<VoiceSession?, VoiceSession?>(null, null)
+                } else {
+                     Pair<VoiceSession?, VoiceSession?>(session, null)
+                }
+            }
+        }
+
+        sessionToInitiate?.let {
+            log.d("Cleanup received. Starting pending session ${it.id}.")
+            it.initiate()
+        }
+
+        sessionToProcess?.processPacket(packet)
+    }
+
+    fun onSessionFinalized(session: VoiceSession) {
+        val sessionToInitiate = synchronized(this) {
+            if (currentSession == session) {
+                currentSession = null
+                
+                if (isRestartPending) {
+                     isRestartPending = false
+                     currentSession = pendingSession
+                     pendingSession = null
+                     currentSession
+                } else null
+            } else null
+        }
+        
+        sessionToInitiate?.let {
+            log.d("Session finalized. Resuming pending session ${it.id}.")
+            it.initiate()
         }
     }
 }

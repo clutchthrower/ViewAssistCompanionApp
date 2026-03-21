@@ -93,7 +93,7 @@ class SatelliteClientHandler(
 
             override fun notifyContinueConversation(phrase: String) {
                 config.eventBroadcaster.notifyEvent(Event("continueConversationStart", "", ""))
-                initiateInteraction(precedeWithWakeDetection = false)
+                sessionCoordinator.startContinueConversation()
             }
 
             override fun notifyRecognitionError(code: String, text: String) {
@@ -109,8 +109,8 @@ class SatelliteClientHandler(
                 mainHandler.removeCallbacks(pipelineTimeoutRunnable)
             }
 
-            override fun initiatePipeline(session: VoiceSession) {
-                initiateInteraction(session, precedeWithWakeDetection = true)
+            override fun initiatePipeline(session: VoiceSession, isContinue: Boolean) {
+                initiateInteraction(session, precedeWithWakeDetection = !isContinue)
             }
             
             override fun onSessionFinalized(session: VoiceSession) {
@@ -120,11 +120,11 @@ class SatelliteClientHandler(
     }
 
     val pipelineStage: PipelineStage
-        get() = sessionCoordinator.currentSession?.stage ?: PipelineStage.IDLE
+        get() = sessionCoordinator.activeSession?.stage ?: PipelineStage.IDLE
 
     private var pingTimer: Timer? = null
     private val pipelineTimeoutRunnable = Runnable { 
-        log.d("Pipeline timed out (Session ${sessionCoordinator.currentSession?.id})")
+        log.d("Pipeline timed out (Session ${sessionCoordinator.activeSession?.id})")
         sessionCoordinator.reset() 
     }
 
@@ -173,13 +173,13 @@ class SatelliteClientHandler(
         }
         
         mediaHandler.release()
-        runCatching { client.close() }
-        
         sendExecutor.shutdown()
         runCatching { sendExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
         
         broadcastExecutor.shutdown()
         runCatching { broadcastExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
+
+        runCatching { client.close() }
         
         val remaining = config.atomicConnectionCount.decrementAndGet()
         log.w("$connectionId:$clientId disconnected. Remaining connections: $remaining")
@@ -306,7 +306,7 @@ class SatelliteClientHandler(
         // Sync forceContinue if found in custom event
         eventData["intent_output"]?.jsonObject?.let { output ->
             output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { 
-                sessionCoordinator.currentSession?.forceContinue = it
+                sessionCoordinator.activeSession?.forceContinue = it
             }
         }
 
@@ -366,7 +366,7 @@ class SatelliteClientHandler(
     fun sendInfo() = sendRawEvent(WyomingPacket("info", infoBuilder.buildInfo()))
 
     fun initiateInteraction(session: VoiceSession? = null, precedeWithWakeDetection: Boolean = true) {
-        val targetSession = session ?: sessionCoordinator.currentSession ?: return
+        val targetSession = session ?: sessionCoordinator.activeSession ?: return
         
         val runPipelinePacket = WyomingPacket(
             "run-pipeline",
@@ -402,7 +402,7 @@ class SatelliteClientHandler(
     }
 
     override fun sendAudio(audio: ByteArray) {
-        val session = sessionCoordinator.currentSession ?: return
+        val session = sessionCoordinator.activeSession ?: return
         if (session.stage != PipelineStage.LISTENING) return
 
         val data = buildJsonObject {
@@ -445,23 +445,23 @@ class SatelliteClientHandler(
 
     fun sendRawEvent(packet: WyomingPacket) {
         if (!isRunning.get() || client.isClosed) return
-        
-        // --- Transport Filtering ---
-        val currentSessionId = sessionCoordinator.currentSession?.id
-        if (currentSessionId != null && 
-            packet.sessionId != null && 
-            packet.sessionId != currentSessionId
-        ) {
-            log.d("Dropping packet ${packet.type} for session ${packet.sessionId} (active session: $currentSessionId)")
-            return
-        }
-        
-        if (packet.type == "audio-chunk" && pipelineStage != PipelineStage.LISTENING) {
-            return
-        }
-        // ---------------------------
 
         sendExecutor.execute {
+            // --- Transport Filtering ---
+            val currentSessionId = sessionCoordinator.activeSession?.id
+            if (currentSessionId != null && 
+                packet.sessionId != null && 
+                packet.sessionId != currentSessionId
+            ) {
+                log.d("Dropping packet ${packet.type} for session ${packet.sessionId} (active session: $currentSessionId)")
+                return@execute
+            }
+            
+            if (packet.type == "audio-chunk" && pipelineStage != PipelineStage.LISTENING) {
+                return@execute
+            }
+            // ---------------------------
+            
             runCatching {
                 messenger.sendEvent(packet)
             }.onFailure { if (isRunning.get()) log.e("Failed to send event ${packet.type}: ${it.message}") }

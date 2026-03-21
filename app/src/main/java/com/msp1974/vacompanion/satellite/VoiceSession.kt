@@ -26,10 +26,11 @@ class VoiceSession(
         fun notifyRecognitionError(code: String, text: String)
         fun setPipelineTimeout(seconds: Int)
         fun cancelPipelineTimeout()
-        fun initiatePipeline(session: VoiceSession)
+        fun initiatePipeline(session: VoiceSession, isContinue: Boolean = false)
         fun onSessionFinalized(session: VoiceSession)
     }
 
+    @Volatile
     var stage = PipelineStage.IDLE
         private set
     
@@ -63,10 +64,10 @@ class VoiceSession(
         }
     }
 
-    fun initiate() {
+    fun initiate(isContinue: Boolean = false) {
         callback.onUpdateVolumeDucking("all", true)
         callback.setPipelineTimeout(15)
-        callback.initiatePipeline(this)
+        callback.initiatePipeline(this, isContinue)
     }
 
     fun processPacket(packet: WyomingPacket) {
@@ -99,12 +100,14 @@ class VoiceSession(
             isAudioStreamRequested = false
             callback.onReleaseAudioStream()
         }
-        stage = PipelineStage.IDLE // Done listening
+        
         if (packet.getProp("text").lowercase().contains("never mind")) {
             callback.onUpdateVolumeDucking("all", false)
-            stop()
+            stop(sendAudioStop = true)
+            stage = PipelineStage.IDLE // Done listening
             callback.onSessionFinalized(this)
         } else {
+            stage = PipelineStage.IDLE // Done listening
             callback.setPipelineTimeout(15) // Waiting for synthesis
         }
     }

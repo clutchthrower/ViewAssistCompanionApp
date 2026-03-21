@@ -7,8 +7,5 @@ import com.msp1974.vacompanion.wyoming.PipelineStage
  */
 enum class SatelliteState { 
     STOPPED, 
-    RUNNING, 
-    STARTING, 
-    STOPPING 
+    RUNNING
 }
-

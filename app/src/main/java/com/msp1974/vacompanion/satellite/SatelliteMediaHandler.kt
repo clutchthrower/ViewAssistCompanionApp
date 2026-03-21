@@ -28,14 +28,17 @@ class SatelliteMediaHandler(context: Context) {
      */
     fun updateVolumeDucking(key: String, duck: Boolean) {
         when (key) {
-            "music" -> if (duck) musicPlayer.duckVolume() else musicPlayer.unDuckVolume()
+            "music" -> {
+                if (duck) musicPlayer.duckVolume() 
+                else if (!alarmPlayer.isSounding) musicPlayer.unDuckVolume()
+            }
             "alarm" -> if (duck) alarmPlayer.duckVolume() else alarmPlayer.unDuckVolume()
             "all" -> {
                 if (duck) {
                     musicPlayer.duckVolume()
                     alarmPlayer.duckVolume()
                 } else {
-                    musicPlayer.unDuckVolume()
+                    if (!alarmPlayer.isSounding) musicPlayer.unDuckVolume()
                     alarmPlayer.unDuckVolume()
                 }
             }
