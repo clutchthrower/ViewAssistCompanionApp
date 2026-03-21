@@ -23,6 +23,7 @@ import java.io.DataOutputStream
 import java.io.EOFException
 import java.net.Socket
 import java.util.*
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -47,17 +48,17 @@ class SatelliteClientHandler(
     private val mediaHandler: SatelliteMediaHandler = SatelliteMediaHandler(context),
     private val actionHandler: SatelliteActionHandler = SatelliteActionHandler(context, config, mediaHandler, log),
     private val infoBuilder: SatelliteInfoBuilder = SatelliteInfoBuilder(context, config, server.getDeviceInfo()),
-    private val mainHandler: Handler = Handler(Looper.getMainLooper())
+    private val mainHandler: Handler = Handler(Looper.getMainLooper()),
+    private val sendExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "SatelliteClient-${client.port}")
+    },
+    private val broadcastExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 ) : WyomingClient {
 
     private val connectionId = client.inetAddress.hostAddress ?: "unknown"
     override val clientId: Int = client.port
     
-    // Concurrency
-    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "SatelliteClient-$clientId")
-    }
-    private val broadcastExecutor = Executors.newSingleThreadExecutor()
+    // State Management (Executors provided via constructor)
 
     // State Management
     private val isRunning = AtomicBoolean(true)

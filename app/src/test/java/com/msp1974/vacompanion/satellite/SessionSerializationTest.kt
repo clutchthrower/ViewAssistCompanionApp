@@ -16,6 +16,9 @@ import org.junit.Rule
 import org.junit.Test
 import java.net.InetAddress
 import java.net.Socket
+import java.util.concurrent.AbstractExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ExecutorService
 
 class SessionSerializationTest {
 
@@ -53,7 +56,20 @@ class SessionSerializationTest {
         every { config.audioWidth } returns 2
         every { config.audioChannels } returns 1
 
-        clientHandler = SatelliteClientHandler(context, server, socket, log, config, messenger, mediaHandler, actionHandler, infoBuilder, mainHandler)
+        val directExecutor = object : AbstractExecutorService() {
+            override fun execute(command: Runnable) = command.run()
+            override fun shutdown() {}
+            override fun shutdownNow(): List<Runnable> = emptyList()
+            override fun isShutdown(): Boolean = false
+            override fun isTerminated(): Boolean = false
+            override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean = true
+        }
+
+        clientHandler = SatelliteClientHandler(
+            context, server, socket, log, config, messenger, mediaHandler, actionHandler, infoBuilder, mainHandler,
+            sendExecutor = directExecutor,
+            broadcastExecutor = directExecutor
+        )
         clientHandler.processPacket(WyomingPacket("run-satellite", buildJsonObject {}))
     }
 
@@ -85,7 +101,7 @@ class SessionSerializationTest {
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}, sessionId = null))
 
         // Now second session should initiate
-        verify(timeout = 1000) { 
+        verify { 
             messenger.sendEvent(match { it.type == "detection" }) 
             messenger.sendEvent(match { it.type == "run-pipeline" })
         }
@@ -100,7 +116,7 @@ class SessionSerializationTest {
         // Stage should be IDLE right now (waiting for transcribe or audio-start)
         clientHandler.sendRawEvent(WyomingPacket("audio-chunk", buildJsonObject {}, byteArrayOf(1, 2)))
         
-        verify(timeout = 1000, exactly = 0) { messenger.sendEvent(any()) }
+        verify(exactly = 0) { messenger.sendEvent(any()) }
     }
 
     @Test
@@ -113,7 +129,7 @@ class SessionSerializationTest {
         val staleSessionId = 99
         clientHandler.sendRawEvent(WyomingPacket("info", buildJsonObject {}, sessionId = staleSessionId))
         
-        verify(timeout = 1000, exactly = 0) { messenger.sendEvent(any()) }
+        verify(exactly = 0) { messenger.sendEvent(any()) }
     }
     @Test
     fun `test never mind transcript interrupts session and finalizes`() {

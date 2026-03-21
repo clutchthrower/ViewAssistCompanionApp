@@ -40,6 +40,8 @@ class VoiceSession(
     @Volatile var forceContinue = false
     @Volatile var isExpectingTtsAudio = false
 
+    private var isAudioStreamRequested = false
+
     @Volatile
     private var isStopped = false
 
