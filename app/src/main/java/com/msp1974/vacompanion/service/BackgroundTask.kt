@@ -204,7 +204,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
-            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
+            "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
                     try {
                         if (wakeWordJob != null && wakeWordJob!!.isActive) {
@@ -372,6 +372,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             engine?.setActiveStopWords(listOf("stop"))
 
             sendDiagnostics(0f, 0f)
+            warmUpAudioResources()
 
             engine!!.start().collect {
                 when (it) {
@@ -397,6 +398,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                                     context,
                                     BroadcastSender.STOP_WORD_DETECTED
                                 )
+                                try {
+                                    soundClipPlayer.play(R.raw.stop_word)
+                                } catch (e: Exception) {
+                                    Timber.e("Error playing stop word sound: ${e.message.toString()}")
+                                }
                             }
                         }
                     }
@@ -549,6 +555,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     private fun warmUpAudioResources() {
         soundClipPlayer.prepare(R.raw.error)
+        soundClipPlayer.prepare(R.raw.stop_word)
         if (config.wakeWordSound != "none") {
             val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
             if (resId != 0) {

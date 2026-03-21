@@ -41,14 +41,7 @@ internal class SoundClipPlayer(private val context: Context) {
         
         Handler(context.mainLooper).post {
             try {
-                val player = ExoPlayer.Builder(context).build()
-                val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
-                val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(USAGE_NOTIFICATION)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build()
-                player.setAudioAttributes(audioAttributes, false)
-                player.setMediaItem(mediaItem)
+                val player = createPlayer(resId)
                 player.prepare()
                 players[resId] = player
             } catch (ex: Exception) {
@@ -60,20 +53,16 @@ internal class SoundClipPlayer(private val context: Context) {
     fun play(resId: Int) {
         Handler(context.mainLooper).post {
             try {
+                // Ensure only one feedback sound plays at a time
+                stopAllInternal()
+
                 val player = players[resId]
                 if (player != null) {
                     player.seekTo(0)
                     player.play()
                 } else {
                     // Fallback for non-prepared sounds
-                    val newPlayer = ExoPlayer.Builder(context).build()
-                    val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
-                    val audioAttributes = AudioAttributes.Builder()
-                        .setUsage(USAGE_NOTIFICATION)
-                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                        .build()
-                    newPlayer.setAudioAttributes(audioAttributes, false)
-                    newPlayer.setMediaItem(mediaItem)
+                    val newPlayer = createPlayer(resId)
                     newPlayer.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == Player.STATE_ENDED) {
@@ -86,6 +75,33 @@ internal class SoundClipPlayer(private val context: Context) {
                 }
             } catch (ex: Exception) {
                 ex.printStackTrace()
+            }
+        }
+    }
+
+    private fun createPlayer(resId: Int): ExoPlayer {
+        val player = ExoPlayer.Builder(context).build()
+        val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(USAGE_NOTIFICATION)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        player.setAudioAttributes(audioAttributes, false)
+        player.setMediaItem(mediaItem)
+        return player
+    }
+
+    fun stopAll() {
+        Handler(context.mainLooper).post {
+            stopAllInternal()
+        }
+    }
+
+    private fun stopAllInternal() {
+        players.values.forEach {
+            if (it.isPlaying) {
+                it.pause()
+                it.seekTo(0)
             }
         }
     }
