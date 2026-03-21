@@ -40,12 +40,14 @@ class VoiceSession(
     @Volatile var forceContinue = false
     @Volatile var isExpectingTtsAudio = false
 
-    private var isAudioStreamRequested = false
+    @Volatile
+    private var isStopped = false
 
     /**
      * Resets the entire session, notifying the environment if needed.
      */
     fun stop(sendAudioStop: Boolean = true) {
+        isStopped = true
         val wasListening = stage == PipelineStage.LISTENING
         
         stage = PipelineStage.IDLE
@@ -65,6 +67,10 @@ class VoiceSession(
     }
 
     fun initiate(isContinue: Boolean = false) {
+        if (isStopped) {
+            log.d("Session $id was stopped before it could be initiated. Aborting.")
+            return
+        }
         callback.onUpdateVolumeDucking("all", true)
         callback.setPipelineTimeout(15)
         callback.initiatePipeline(this, isContinue)

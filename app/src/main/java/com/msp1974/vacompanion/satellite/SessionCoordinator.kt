@@ -80,6 +80,14 @@ class SessionCoordinator(
         sessionToStart?.initiate(isContinue = true)
     }
 
+    fun setForceContinue(id: Int, value: Boolean) {
+        synchronized(this) {
+            if (currentSession?.id == id) {
+                currentSession?.forceContinue = value
+            }
+        }
+    }
+
     fun processPacket(packet: WyomingPacket) {
         val (sessionToProcess, sessionToInitiate) = synchronized(this) {
             val session = currentSession

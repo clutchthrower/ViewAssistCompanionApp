@@ -305,8 +305,10 @@ class SatelliteClientHandler(
 
         // Sync forceContinue if found in custom event
         eventData["intent_output"]?.jsonObject?.let { output ->
-            output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { 
-                sessionCoordinator.activeSession?.forceContinue = it
+            output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { value ->
+                sessionCoordinator.activeSession?.let { session ->
+                    sessionCoordinator.setForceContinue(session.id, value)
+                }
             }
         }
 
