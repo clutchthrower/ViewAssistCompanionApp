@@ -191,19 +191,14 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 )
             }
             "recognitionError" -> {
-                when (event.newValue) {
-                    "duplicate_wake_up_detected" -> {}
-                    else -> {
-                        if (config.wakeWordSound != "none") {
-                            try {
-                                SoundClipPlayer(
-                                    context,
-                                    R.raw.error
-                                ).play()
-                            } catch (e: Exception) {
-                                Timber.e("Error playing wake word sound: ${e.message.toString()}")
-                            }
-                        }
+                if (config.wakeWordSound != "none") {
+                    try {
+                        SoundClipPlayer(
+                            context,
+                            R.raw.error
+                        ).play()
+                    } catch (e: Exception) {
+                        Timber.e("Error playing wake word sound: ${e.message.toString()}")
                     }
                 }
                 audioRoute = AudioRouteOption.DETECT

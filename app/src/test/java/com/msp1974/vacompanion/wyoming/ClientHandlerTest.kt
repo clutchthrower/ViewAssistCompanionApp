@@ -120,8 +120,8 @@ class ClientHandlerTest {
     }
 
     @Test
-    fun `test initiatePipeline sends detection and run-pipeline when precedeWithWakeDetection is true`() {
-        clientHandler.initiatePipeline(precedeWithWakeDetection = true)
+    fun `test initiatePipeline sends detection and run-pipeline by default`() {
+        clientHandler.initiatePipeline()
         
         verify(timeout = 1000) {
             messenger.sendEvent(match { it.type == "detection" }, any(), any())
@@ -150,16 +150,19 @@ class ClientHandlerTest {
     }
 
     @Test
-    fun `test onWakeWordDetected interrupts and schedules cleanup when already streaming`() {
+    fun `test onWakeWordDetected interrupts response and initiates pipeline when already streaming`() {
         clientHandler.initiatePipeline()
+        clearMocks(messenger)
+        
         // Simulate synthesizer stage to reach AWAITING_TTS
         clientHandler.processEvent(WyomingPacket("synthesize", buildJsonObject {}))
         
         clientHandler.onWakeWordDetected()
         
-        verify {
+        verify(timeout = 1000) {
             log.d(match { it.contains("Interrupting response") })
-            mainHandler.postDelayed(any(), 2800L)
+            messenger.sendEvent(match { it.type == "detection" }, any(), any())
+            messenger.sendEvent(match { it.type == "run-pipeline" }, any(), any())
         }
     }
 

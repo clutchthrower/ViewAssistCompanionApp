@@ -63,18 +63,11 @@ class ClientHandler(
     private val sessionIdGenerator = AtomicInteger(0)
     private var currentSession: PipelineSession? = null
     @Volatile private var isExpectingTtsAudio = false
-    @Volatile private var isPendingInterruptCleanup = false
     
     private var pingTimer: Timer? = null
 
     // Runnables
     private val pipelineTimeoutRunnable = Runnable { handlePipelineTimeout() }
-    private val interruptCleanupTimeoutRunnable = Runnable {
-        if (!isPendingInterruptCleanup) return@Runnable
-        isPendingInterruptCleanup = false
-        log.d("Interrupt cleanup timeout; initiating pipeline without detection")
-        initiatePipeline(precedeWithWakeDetection = false)
-    }
 
     // Broadcasts
     private val intentFilter = IntentFilter().apply {
@@ -153,7 +146,6 @@ class ClientHandler(
             stopSatelliteInternal()
         }
 
-        cancelInterruptCleanup()
 
 
         
@@ -179,29 +171,14 @@ class ClientHandler(
             if (pipelineStage == PipelineStage.STREAMING || pipelineStage == PipelineStage.AWAITING_TTS) {
                 log.d("Interrupting response ($pipelineStage) for new wake word")
                 resetCurrentPipeline()
-                scheduleInterruptCleanup()
-                return
-            } else {
-                log.d("Ignoring redundant wake word detection ($pipelineStage)")
+                initiatePipeline()
                 return
             }
         }
 
-        cancelInterruptCleanup()
         log.d("Wake word detected. Starting pipeline.")
         mediaManager.updateVolumeDucking("all", true)
-        initiatePipeline(precedeWithWakeDetection = true)
-    }
-
-    private fun cancelInterruptCleanup() {
-        isPendingInterruptCleanup = false
-        mainHandler.removeCallbacks(interruptCleanupTimeoutRunnable)
-    }
-
-    private fun scheduleInterruptCleanup() {
-        cancelInterruptCleanup()
-        isPendingInterruptCleanup = true
-        mainHandler.postDelayed(interruptCleanupTimeoutRunnable, 2_800L)
+        initiatePipeline()
     }
 
     internal fun startSatellite() {
@@ -376,14 +353,6 @@ class ClientHandler(
     }
 
     private fun handlePipelineEnded() {
-        if (isPendingInterruptCleanup) {
-            mainHandler.removeCallbacks(interruptCleanupTimeoutRunnable)
-            isPendingInterruptCleanup = false
-            log.d("pipeline-ended after wake interrupt; initiating pipeline without detection (avoids HA duplicate-wake STT cancel)")
-            initiatePipeline(precedeWithWakeDetection = false)
-            return
-        }
-
         val session = currentSession ?: return
         session.logicFinished = true
 
@@ -451,14 +420,22 @@ class ClientHandler(
                 
                 if (hadSynthesize && shouldContinue) {
                     log.d("Continuing conversation as requested by Home Assistant Turn result.")
-                    initiatePipeline()
+                    initiatePipeline(precedeWithWakeDetection = false)
                 }
             }
         }
     }
 
     private fun handlePipelineError(event: WyomingPacket) {
-        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", event.getProp("code")))
+        val code = event.getProp("code")
+        
+        val isDuplicateWakeUp = code == "duplicate_wake_up_detected"
+                                
+        if (isDuplicateWakeUp) {
+            log.d("Speech-to-text cancelled to avoid duplicate wake-up. Handled gracefully.")
+        }
+        
+        config.eventBroadcaster.notifyEvent(Event("recognitionError", "", code))
         resetCurrentPipeline()
     }
 
@@ -585,7 +562,7 @@ class ClientHandler(
      * @param precedeWithWakeDetection when true, sends `detection` and `run-pipeline` back-to-back
      * in one [sendExecutor] task to ensure no other events interleave on the wire.
      */
-    fun initiatePipeline(precedeWithWakeDetection: Boolean = false) {
+    fun initiatePipeline(precedeWithWakeDetection: Boolean = true) {
         if (pipelineStage == PipelineStage.LISTENING) {
             releaseInputAudioStream()
         }
