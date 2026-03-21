@@ -240,4 +240,30 @@ class ClientHandlerTest {
             messenger.sendEvent(match { it.type == "run-pipeline" }, any(), any())
         }
     }
+
+    @Test
+    fun `test handleAudioStop releases input audio stream if logic ended`() {
+        clientHandler.initiatePipeline()
+        
+        // Advance to LISTENING
+        clientHandler.processEvent(WyomingPacket("transcribe", buildJsonObject {}))
+        
+        // Simulate synthesize to make audioDone = false until audioStop
+        clientHandler.processEvent(WyomingPacket("synthesize", buildJsonObject {}))
+        
+        // Advance to STREAMING
+        clientHandler.handleAudioStart()
+        
+        // Mark logic as finished
+        clientHandler.processEvent(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        
+        // Preliminary checks
+        verify(exactly = 0) { server.releaseInputAudioStream() }
+        
+        // Act
+        clientHandler.handleAudioStop()
+        
+        // Verify. Bug was: manual IDLE set prevented this call.
+        verify(exactly = 1) { server.releaseInputAudioStream() }
+    }
 }

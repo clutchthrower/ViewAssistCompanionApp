@@ -380,9 +380,7 @@ class ClientHandler(
     private fun cleanupPipeline() {
         cancelPipelineTimeout()
         mediaManager.updateVolumeDucking("all", false)
-        if (pipelineStage != PipelineStage.STREAMING) {
-            releaseInputAudioStream()
-        }
+        releaseInputAudioStream()
     }
 
     internal fun handleAudioStart() {
@@ -402,26 +400,23 @@ class ClientHandler(
 
     internal fun handleAudioStop() {
         if (isPipelineActive()) {
+            val session = currentSession ?: return
+            
             if (mediaManager.pcmMediaPlayer.isPlaying) {
                 // We send 'played' but we DON'T stop immediately, to allow draining.
                 // The next synthesizer or a reset will stop it properly.
                 sendEvent("played")
             }
             
-            pipelineStage = PipelineStage.IDLE
             val hadSynthesize = isExpectingTtsAudio
-            val session = currentSession
+            session.audioFinished = true
+            val shouldContinue = session.forceContinue
             
-            if (session != null) {
-                session.audioFinished = true
-                val shouldContinue = session.forceContinue
-                
-                checkFinalizeSession(session)
-                
-                if (hadSynthesize && shouldContinue) {
-                    log.d("Continuing conversation as requested by Home Assistant Turn result.")
-                    initiatePipeline(precedeWithWakeDetection = false)
-                }
+            checkFinalizeSession(session)
+            
+            if (hadSynthesize && shouldContinue) {
+                log.d("Continuing conversation as requested by Home Assistant Turn result.")
+                initiatePipeline(precedeWithWakeDetection = false)
             }
         }
     }
@@ -586,6 +581,10 @@ class ClientHandler(
             }
         )
 
+        currentSession = PipelineSession(nextId)
+        isExpectingTtsAudio = false
+        setPipelineTimeout(15)
+
         sendExecutor.execute {
             if (precedeWithWakeDetection) {
                 val detectionPacket = WyomingPacket(
@@ -601,10 +600,6 @@ class ClientHandler(
             }
             messenger.sendEvent(runPipelinePacket.copy(sessionId = nextId), pipelineStage, nextId)
         }
-
-        currentSession = PipelineSession(nextId)
-        isExpectingTtsAudio = false
-        setPipelineTimeout(15)
     }
 
     /** @param sessionId session to tag the stop with; pass from before clearing [currentSession] on reset. */
