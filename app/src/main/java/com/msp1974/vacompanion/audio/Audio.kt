@@ -29,37 +29,71 @@ internal class AudioManager(context: Context) {
     }
 }
 
-internal class SoundClipPlayer(private val context: Context, private val resId: Int) {
-    private lateinit var mediaPlayer: ExoPlayer
+/**
+ * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
+ * to eliminate buffering latency on first playback and ensure immediate audio feedback.
+ */
+internal class SoundClipPlayer(private val context: Context) {
+    private val players = mutableMapOf<Int, ExoPlayer>()
 
-    fun play() {
-        try {
-            Handler(context.mainLooper).post({
-                mediaPlayer = ExoPlayer.Builder(context).build()
+    fun prepare(resId: Int) {
+        if (players.containsKey(resId)) return
+        
+        Handler(context.mainLooper).post {
+            try {
+                val player = ExoPlayer.Builder(context).build()
                 val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
                 val audioAttributes = AudioAttributes.Builder()
                     .setUsage(USAGE_NOTIFICATION)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build()
-                mediaPlayer.setAudioAttributes(audioAttributes, false)
-                mediaPlayer.setMediaItem(mediaItem)
+                player.setAudioAttributes(audioAttributes, false)
+                player.setMediaItem(mediaItem)
+                player.prepare()
+                players[resId] = player
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+        }
+    }
 
-                mediaPlayer.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        super.onPlaybackStateChanged(playbackState)
-                        if (playbackState == Player.STATE_ENDED) {
-                            mediaPlayer.release()
+    fun play(resId: Int) {
+        Handler(context.mainLooper).post {
+            try {
+                val player = players[resId]
+                if (player != null) {
+                    player.seekTo(0)
+                    player.play()
+                } else {
+                    // Fallback for non-prepared sounds
+                    val newPlayer = ExoPlayer.Builder(context).build()
+                    val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setUsage(USAGE_NOTIFICATION)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .build()
+                    newPlayer.setAudioAttributes(audioAttributes, false)
+                    newPlayer.setMediaItem(mediaItem)
+                    newPlayer.addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_ENDED) {
+                                newPlayer.release()
+                            }
                         }
-                    }
-                })
+                    })
+                    newPlayer.prepare()
+                    newPlayer.play()
+                }
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+        }
+    }
 
-                // Prepare the player.
-                mediaPlayer.prepare()
-                // Start the playback.
-                mediaPlayer.play()
-            })
-        } catch (ex: Exception) {
-            ex.printStackTrace()
+    fun release() {
+        Handler(context.mainLooper).post {
+            players.values.forEach { it.release() }
+            players.clear()
         }
     }
 }

@@ -69,6 +69,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     lateinit var assetManager: AssetManager
     lateinit var server: WyomingTCPServer
     private lateinit var volumeObserver: VolumeObserver
+    private val soundClipPlayer = SoundClipPlayer(context)
 
     private var motionTask = CameraBackgroundTask(context)
 
@@ -100,6 +101,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 volumeObserver.register()
                 startSensors(context)
                 runWakeWordDetection()
+                warmUpAudioResources()
                 BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_STARTED)
                 zeroConf.unregisterService()
             }
@@ -198,10 +200,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
                 if (config.wakeWordSound != "none") {
                     try {
-                        SoundClipPlayer(
-                            context,
-                            R.raw.error
-                        ).play()
+                        soundClipPlayer.play(R.raw.error)
                     } catch (e: Exception) {
                         Timber.e("Error playing wake word sound: ${e.message.toString()}")
                     }
@@ -419,14 +418,13 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
         if (!isStreaming && config.wakeWordSound != "none") {
             try {
-                SoundClipPlayer(
-                    context,
+                soundClipPlayer.play(
                     context.resources.getIdentifier(
                         config.wakeWordSound,
                         "raw",
                         context.packageName
                     )
-                ).play()
+                )
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
             }
@@ -500,6 +498,16 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         }
     }
 
+    private fun warmUpAudioResources() {
+        soundClipPlayer.prepare(R.raw.error)
+        if (config.wakeWordSound != "none") {
+            val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+    }
+
 
     fun shutdown() {
         Timber.i("Shutting down")
@@ -511,6 +519,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         motionTask.stopCamera()
         terminateWakeWordDetection()
         stopSensors()
+        soundClipPlayer.release()
         server.stop()
 
     }
