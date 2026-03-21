@@ -416,6 +416,7 @@ class ClientHandler(
             
             if (hadSynthesize && shouldContinue) {
                 log.d("Continuing conversation as requested by Home Assistant Turn result.")
+                config.eventBroadcaster.notifyEvent(Event("continueConversationStart", "", ""))
                 initiatePipeline(precedeWithWakeDetection = false)
             }
         }

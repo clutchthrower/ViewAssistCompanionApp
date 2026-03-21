@@ -204,6 +204,22 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
+            "continueConversationStart" -> {
+                if (config.wakeWordSound != "none") {
+                    try {
+                        val resId = context.resources.getIdentifier(
+                            config.wakeWordSound,
+                            "raw",
+                            context.packageName
+                        )
+                        if (resId != 0) {
+                            soundClipPlayer.play(resId)
+                        }
+                    } catch (e: Exception) {
+                        Timber.e("Error playing continue listening sound: ${e.message.toString()}")
+                    }
+                }
+            }
             "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
                     try {
