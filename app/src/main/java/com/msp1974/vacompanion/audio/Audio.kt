@@ -12,6 +12,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.min
+import timber.log.Timber
 
 internal class AudioManager(context: Context) {
     private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
@@ -58,9 +59,11 @@ class SoundClipPlayer(private val context: Context) {
 
                 val player = players[resId]
                 if (player != null) {
+                    Timber.d("SoundClipPlayer: Playing resource $resId (cached)")
                     player.seekTo(0)
                     player.play()
                 } else {
+                    Timber.d("SoundClipPlayer: Playing resource $resId (fallback/uncached)")
                     // Fallback for non-prepared sounds
                     val newPlayer = createPlayer(resId)
                     newPlayer.addListener(object : Player.Listener {
@@ -69,12 +72,15 @@ class SoundClipPlayer(private val context: Context) {
                                 newPlayer.release()
                             }
                         }
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            Timber.e("SoundClipPlayer Error: ${error.message}")
+                        }
                     })
                     newPlayer.prepare()
                     newPlayer.play()
                 }
             } catch (ex: Exception) {
-                ex.printStackTrace()
+                Timber.e("SoundClipPlayer: Error during play(): ${ex.message}")
             }
         }
     }
@@ -83,9 +89,10 @@ class SoundClipPlayer(private val context: Context) {
         val player = ExoPlayer.Builder(context).build()
         val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(USAGE_NOTIFICATION)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
             .build()
+
         player.setAudioAttributes(audioAttributes, false)
         player.setMediaItem(mediaItem)
         return player

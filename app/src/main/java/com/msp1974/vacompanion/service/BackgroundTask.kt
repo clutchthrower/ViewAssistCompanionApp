@@ -173,9 +173,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     }
                 }
                 try {
-                    soundClipPlayer.play(R.raw.stop_listening)
+                    soundClipPlayer.play(R.raw.processing)
                 } catch (e: Exception) {
-                    Timber.e("Error playing stopped listening sound: ${e.message.toString()}")
+                    Timber.e("Error playing processing sound: ${e.message.toString()}")
                 }
                 engine?.setStreaming(false)
             }
@@ -196,7 +196,13 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         when (event.eventName) {
             "isMuted" -> {
                 try {
-                    engine?.setMuted(event.newValue as Boolean)
+                    val isMuted = event.newValue as Boolean
+                    engine?.setMuted(isMuted)
+                    if (isMuted) {
+                        soundClipPlayer.play(R.raw.mute_switch_on)
+                    } else {
+                        soundClipPlayer.play(R.raw.mute_switch_off)
+                    }
                     sendDiagnostics(0f,0f)
                 } catch (e: Exception) {
                     Timber.e("Error setting muted: ${e.message.toString()}")
@@ -578,7 +584,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private fun warmUpAudioResources() {
         soundClipPlayer.prepare(R.raw.error)
         soundClipPlayer.prepare(R.raw.stop_word)
-        soundClipPlayer.prepare(R.raw.stop_listening)
+        soundClipPlayer.prepare(R.raw.processing)
+        soundClipPlayer.prepare(R.raw.mute_switch_on)
+        soundClipPlayer.prepare(R.raw.mute_switch_off)
         if (config.wakeWordSound != "none") {
             val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
             if (resId != 0) {
