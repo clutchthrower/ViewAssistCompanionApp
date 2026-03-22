@@ -207,10 +207,9 @@ class VoiceSession(
         val code = packet.getProp("code")
         val text = packet.getProp("text")
         
-        if (code != "duplicate_wake_up_detected") {
-             val toastMessage = text.ifEmpty { "Error: $code" }
-             callback.notifyRecognitionError(code, toastMessage)
-        }
+        val toastMessage = text.ifEmpty { "Error: $code" }
+        callback.notifyRecognitionError(code, toastMessage)
+        
         needsContinue = false
         stop()
         callback.onSessionFinalized(this)

@@ -488,7 +488,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
         }
 
-        if (!isStreaming && config.wakeWordSound != "none") {
+        if (config.wakeWordSound != "none") {
             try {
                 soundClipPlayer.play(
                     context.resources.getIdentifier(
