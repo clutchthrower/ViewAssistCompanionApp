@@ -370,6 +370,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     webView.loadUrl(url)
                 }
                 Intent.ACTION_SCREEN_ON -> {
+                    this@MainActivity.setTurnScreenOn(false)
                     if (initialised) {
                         // If woken by hardware buttons set screen config
                         setScreenSettings()
@@ -464,6 +465,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 runBackgroundTasks()
             }
         }
+
+        this.setTurnScreenOn(false)
+
         setScreenSettings()
     }
 
@@ -622,29 +626,27 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun screenWake() {
-        Timber.d("Wake screen")
-        // Cancel any screen sleep timer
-        if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
-            screenSleepWaitJob!!.cancel()
-        }
+        if (!screen.isScreenOn() && !screenOffInProgress) {
+            Timber.d("Wake screen")
+            // Cancel any screen sleep timer
+            if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
+                screenSleepWaitJob!!.cancel()
+            }
 
-        // Experimental fix for screen not turning on on A15+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            this.setTurnScreenOn(true);
-        } else {
-            window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        }
+            this.setTurnScreenOn(true)
 
-        screen.wakeScreen()
+            screen.wakeScreen()
+        }
 
         screenOffInProgress = false
         if (initialised) {
             setScreenSaver(false)
+            setScreenSettings()
         }
     }
 
     fun screenSleep() {
-        if (screen.isScreenOff()) {
+        if (screen.isScreenOff() && !screenOffInProgress) {
             Timber.d("Screen already off, ignoring sleep request")
             return
         }
@@ -659,6 +661,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             Timber.d("Sleeping screen via timeout")
             screenOffInProgress = true
             setScreenSaver(true)
+            screen.setScreenAlwaysOn(window, false) // Ensure screen CAN turn off
             screen.setPartialWakeLock()
             if (screen.setScreenTimeout(1000)) {
                 screenSleepWaitJob = lifecycleScope.launch {
@@ -691,7 +694,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             screenOffInProgress = false
             return
         }
-        config.screenOn = false
+        if (config.screenOn) {
+            config.screenOn = false
+        }
         screenOffInProgress = false
         log.d("Screen off")
     }
