@@ -96,7 +96,7 @@ class SatelliteClientHandler(
                 }
             }
 
-            override fun onStopMediaPlayback() = mediaHandler.pcmMediaPlayer.stop()
+            override fun onStopMediaPlayback() = mediaHandler.pcmMediaPlayer.stop(force = true)
 
             override fun onUpdateVolumeDucking(key: String, duck: Boolean) = mediaHandler.updateVolumeDucking(key, duck)
 

@@ -51,6 +51,10 @@ class SessionCoordinator(
                 val toStop = currentSession
                 currentSession = null
                 toStop
+            } else if (isRestartPending) {
+                val nextId = sessionIdGenerator.incrementAndGet()
+                pendingSession = VoiceSession(nextId, log, callback)
+                null
             } else {
                 null
             }
@@ -63,6 +67,7 @@ class SessionCoordinator(
         }
 
         val sessionToStart = synchronized(this) {
+            if (currentSession != null || isRestartPending) return@synchronized null
             val nextId = sessionIdGenerator.incrementAndGet()
             currentSession = VoiceSession(nextId, log, callback)
             currentSession

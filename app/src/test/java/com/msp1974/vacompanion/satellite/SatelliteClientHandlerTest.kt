@@ -187,7 +187,7 @@ class SatelliteClientHandlerTest {
         
         verify {
             mediaHandler.updateVolumeDucking("all", false)
-            mediaHandler.pcmMediaPlayer.stop()
+            mediaHandler.pcmMediaPlayer.stop(true)
         }
     }
 

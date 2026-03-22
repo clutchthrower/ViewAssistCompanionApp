@@ -201,12 +201,9 @@ class VoiceSession(
         
         logicFinished = true
 
-        if (stage == PipelineStage.PROCESSING || stage == PipelineStage.AWAITING_TTS || stage == PipelineStage.STREAMING) {
+        checkFinalize()
+        if (!finalized && (stage == PipelineStage.PROCESSING || stage == PipelineStage.AWAITING_TTS || stage == PipelineStage.STREAMING)) {
             log.d("Pipeline ended. Waiting for audio completion if needed (Session $id, stage: $stage).")
-            if (stage == PipelineStage.PROCESSING) {
-                 // If we were processing and it ended without synthesize, we're done.
-                 checkFinalize()
-            }
             return
         }
     }
