@@ -117,6 +117,10 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var alarmVolume: Int by Delegates.observable(DEFAULT_ALARM_VOLUME) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var duckingVolume: Int by Delegates.observable(DEFAULT_DUCKING_VOLUME) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -267,11 +271,15 @@ class APPConfig(val context: Context) {
         get() = this.sharedPrefs.getBoolean("always_ignore_ssl_errors", false)
         set(value) = this.sharedPrefs.edit { putBoolean("always_ignore_ssl_errors", value) }
 
+    private fun JsonElement?.asIntOrNull(): Int? {
+        return this?.jsonPrimitive?.intOrNull ?: this?.jsonPrimitive?.floatOrNull?.toInt()
+    }
+
     fun processSettings(settingString: String) {
         initSettings = true
         val settings = Json.parseToJsonElement(settingString).jsonObject
         
-        settings["ha_port"]?.jsonPrimitive?.intOrNull?.let { homeAssistantHTTPPort = it }
+        settings["ha_port"]?.asIntOrNull()?.let { homeAssistantHTTPPort = it }
         settings["ha_url"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantURL = it }
         settings["ha_dashboard"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantDashboard = it }
         settings["advanced_gain"]?.jsonPrimitive?.booleanOrNull?.let { useAdvancedGain = it }
@@ -279,11 +287,12 @@ class APPConfig(val context: Context) {
         settings["wake_word"]?.jsonPrimitive?.contentOrNull?.let { wakeWord = it }
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
         settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
-        settings["raw_proximity_threshold"]?.jsonPrimitive?.intOrNull?.let { rawProximitySensorThreshold = it }
-        settings["notification_volume"]?.jsonPrimitive?.intOrNull?.let { notificationVolume = it }
-        settings["music_volume"]?.jsonPrimitive?.intOrNull?.let { musicVolume = it }
-        settings["ducking_volume"]?.jsonPrimitive?.intOrNull?.let { duckingVolume = it }
-        settings["mic_gain"]?.jsonPrimitive?.intOrNull?.let { micGain = it }
+        settings["raw_proximity_threshold"]?.asIntOrNull()?.let { rawProximitySensorThreshold = it }
+        settings["notification_volume"]?.asIntOrNull()?.let { notificationVolume = it }
+        settings["music_volume"]?.asIntOrNull()?.let { musicVolume = it }
+        settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
+        settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
+        settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
         settings["mute"]?.jsonPrimitive?.booleanOrNull?.let { isMuted = it }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
         settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
@@ -294,7 +303,7 @@ class APPConfig(val context: Context) {
         settings["diagnostics_enabled"]?.jsonPrimitive?.booleanOrNull?.let { diagnosticsEnabled = it }
         settings["integration_version"]?.jsonPrimitive?.contentOrNull?.let { integrationVersion = it }
         settings["min_required_apk_version"]?.jsonPrimitive?.contentOrNull?.let { minRequiredApkVersion = it }
-        settings["zoom_level"]?.jsonPrimitive?.intOrNull?.let { zoomLevel = it }
+        settings["zoom_level"]?.asIntOrNull()?.let { zoomLevel = it }
         settings["screen_on_wake_word"]?.jsonPrimitive?.booleanOrNull?.let { screenOnWakeWord = it }
         settings["screen_on_bump"]?.jsonPrimitive?.booleanOrNull?.let { screenOnBump = it }
         settings["screen_on_proximity"]?.jsonPrimitive?.booleanOrNull?.let { screenOnProximity = it }
@@ -302,8 +311,8 @@ class APPConfig(val context: Context) {
         settings["screen_on"]?.jsonPrimitive?.booleanOrNull?.let { screenOn = it }
         settings["enable_network_recovery"]?.jsonPrimitive?.booleanOrNull?.let { enableNetworkRecovery = it }
         settings["enable_motion_detection"]?.jsonPrimitive?.booleanOrNull?.let { enableMotionDetection = it }
-        settings["motion_detection_sensitivity"]?.jsonPrimitive?.intOrNull?.let { motionDetectionSensitivity = it }
-        settings["screen_timeout"]?.jsonPrimitive?.intOrNull?.let { screenTimeout = it * 1000 }
+        settings["motion_detection_sensitivity"]?.asIntOrNull()?.let { motionDetectionSensitivity = it }
+        settings["screen_timeout"]?.asIntOrNull()?.let { screenTimeout = it * 1000 }
         settings["bump_sensitivity"]?.jsonPrimitive?.floatOrNull?.let { bumpSensitivity = it / 10 }
         settings["screen_saver"]?.jsonPrimitive?.booleanOrNull?.let { screenSaver = it }
         settings["screen_orientation_mode"]?.jsonPrimitive?.contentOrNull?.let { screenOrientationMode = it }
@@ -354,10 +363,11 @@ class APPConfig(val context: Context) {
         const val DEFAULT_WAKE_WORD_THRESHOLD = 0.6f
         const val DEFAULT_NOTIFICATION_VOLUME = 10
         const val DEFAULT_MUSIC_VOLUME = 10
+        const val DEFAULT_ALARM_VOLUME = 10
         const val DEFAULT_SCREEN_BRIGHTNESS = 0.5f
         const val DEFAULT_SCREEN_AUTO_BRIGHTNESS = true
         const val DEFAULT_SWIPE_REFRESH = true
-        const val DEFAULT_DUCKING_VOLUME = 2
+        const val DEFAULT_DUCKING_VOLUME = 70
         const val DEFAULT_MUTE = false
         const val DEFAULT_MIC_GAIN = 0
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"

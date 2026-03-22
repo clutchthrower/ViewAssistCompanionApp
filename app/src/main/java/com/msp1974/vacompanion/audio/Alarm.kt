@@ -8,7 +8,6 @@ import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import androidx.core.net.toUri
 
@@ -17,11 +16,10 @@ class Alarm(val context: Context) {
     private val log = Logger()
     private val config: APPConfig = APPConfig.getInstance(context)
 
-    private var currentVolume: Int = config.musicVolume
     var isVolumeDucked: Boolean = false
     var isSounding: Boolean = false
     var mediaPlayer: MediaPlayer? = null
-    var maxVolume: Int = AudioManager(context).getStreamMaxVolume(android.media.AudioManager.STREAM_NOTIFICATION)
+    private var unduckThread: Thread? = null
 
     fun startAlarm(url: String = "") {
         if (mediaPlayer == null) {
@@ -35,8 +33,8 @@ class Alarm(val context: Context) {
                 }
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_ALARM)
                         .build()
                 )
             }
@@ -58,40 +56,57 @@ class Alarm(val context: Context) {
         }
     }
 
+
     fun stopOnTimeout(timeout: Long) {
-        Executors.newSingleThreadScheduledExecutor().schedule({
+        val executor = Executors.newSingleThreadScheduledExecutor()
+        executor.schedule({
             stopAlarm()
-        }, timeout, TimeUnit.MINUTES)
+        }, timeout, java.util.concurrent.TimeUnit.MINUTES)
     }
 
     fun duckVolume() {
-        if (mediaPlayer != null && !isVolumeDucked) {
-            if (mediaPlayer!!.isPlaying) {
-                val vol = config.duckingVolume
-                if (vol < config.musicVolume) {
-                    log.d("Ducking Alarm volume from $currentVolume to $vol")
-                    mediaPlayer!!.setVolume((vol / maxVolume).toFloat(), (vol / maxVolume).toFloat())
+        synchronized(this) {
+            if (mediaPlayer != null && !isVolumeDucked) {
+                if (mediaPlayer!!.isPlaying) {
+                    unduckThread?.interrupt()
+                    unduckThread = null
+                    
+                    val reduction = config.duckingVolume / 100.0
+                    val vDucked = (1.0 - reduction).toFloat()
+                    log.d("Ducking Alarm volume to relative level $vDucked (${config.duckingVolume}% reduction)")
+                    mediaPlayer!!.setVolume(vDucked, vDucked)
                     isVolumeDucked = true
-                } else {
-                    log.d("Not ducking Alarm volume as it is lower than ducking volume of ${config.duckingVolume} at ${config.musicVolume}")
                 }
             }
         }
     }
 
     fun unDuckVolume() {
-        if (mediaPlayer != null && isVolumeDucked) {
-            log.i("Restoring Alarm volume to ${currentVolume}")
-            thread(name="alarmVolumeUnducking") {
-                val steps = 3
-                val diffStepVolume = (currentVolume - config.duckingVolume) / steps
-                for (i in 1..steps) {
-                    val vol = config.duckingVolume + (diffStepVolume * i)
-                    mediaPlayer!!.setVolume((vol / maxVolume).toFloat(), (vol / maxVolume).toFloat())
-                    if (i < steps) { Thread.sleep(250) }
+        synchronized(this) {
+            if (mediaPlayer != null && isVolumeDucked) {
+                isVolumeDucked = false
+                unduckThread?.interrupt()
+                
+                log.i("Restoring Alarm volume gain to 1.0")
+                val thread = thread(name="alarmVolumeUnducking", start = false) {
+                    try {
+                        val reduction = config.duckingVolume / 100.0
+                        val vStart = (1.0 - reduction).toFloat()
+                        val vTarget = 1.0f
+                        val steps = 3
+                        val diffStepVolume = (vTarget - vStart) / steps
+                        for (i in 1..steps) {
+                            val v = vStart + (diffStepVolume * i)
+                            mediaPlayer!!.setVolume(v, v)
+                            if (i < steps) { Thread.sleep(250) }
+                        }
+                    } catch (ex: InterruptedException) {
+                        log.d("Alarm unducking animation interrupted")
+                    }
                 }
+                unduckThread = thread
+                thread.start()
             }
-            isVolumeDucked = false
         }
     }
 }

@@ -216,6 +216,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
+            "alarmVolume" -> {
+                setVolume(AudioManager.STREAM_ALARM, event.newValue as Int)
+            }
             "continueConversationStart" -> {
                 if (config.wakeWordSound != "none") {
                     try {

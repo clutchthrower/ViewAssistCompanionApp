@@ -174,6 +174,7 @@ class DeviceCapabilitiesManager(val context: Context) {
                 "maxNotificationVolume",
                 audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
             )
+            put("maxAlarmVolume", audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM))
         }
     }
 
@@ -195,6 +196,7 @@ class DeviceCapabilitiesManager(val context: Context) {
                     putJsonObject("audio") {
                         put("max_music_volume", data.audioInfo.getValue("maxMusicVolume"))
                         put("max_notification_volume", data.audioInfo.getValue("maxNotificationVolume"))
+                        put("max_alarm_volume", data.audioInfo.getValue("maxAlarmVolume"))
                     }
                     putJsonArray("sensors") {
                         addAll(data.sensors)

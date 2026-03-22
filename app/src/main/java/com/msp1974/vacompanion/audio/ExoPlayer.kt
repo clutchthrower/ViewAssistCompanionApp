@@ -14,14 +14,12 @@ import androidx.media3.common.Player
 
 class VAMediaPlayer(val context: Context) {
     private val config: APPConfig = APPConfig.getInstance(context)
-    @Volatile private var currentVolume: Int = config.musicVolume
     private var mediaPlayer: ExoPlayer? = null
     
     @GuardedBy("this")
     private var isVolumeDucked: Boolean = false
     
     private var playRequested: Boolean = false
-    private val maxVolume = AudioManager(context).getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
     
     private val mainHandler = Handler(context.mainLooper)
     private var unduckThread: Thread? = null
@@ -61,11 +59,10 @@ class VAMediaPlayer(val context: Context) {
                 player.setMediaItem(mediaItem)
                 
                 // Initialize volume based on current ducking status
-                // If ducked, ensure we don't boost volume if current is already lower than target
                 val baseVol = if (synchronized(this) { isVolumeDucked }) {
-                    Math.min(currentVolume, config.duckingVolume)
-                } else currentVolume
-                player.volume = (baseVol / maxVolume.toFloat())
+                    (1.0 - config.duckingVolume / 100.0).toFloat()
+                } else 1.0f
+                player.volume = baseVol
                 
                 player.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -111,16 +108,6 @@ class VAMediaPlayer(val context: Context) {
         }
     }
 
-    fun setVolume(volume: Int) {
-        currentVolume = volume
-        mainHandler.post {
-            val isDucked = synchronized(this) { isVolumeDucked }
-            if (!isDucked) {
-                mediaPlayer?.volume = volume / maxVolume.toFloat()
-            }
-            Timber.i("Music volume set to $volume (State: ${if (isDucked) "Ducked" else "Normal"})")
-        }
-    }
 
     fun duckVolume() {
         mainHandler.post {
@@ -141,11 +128,10 @@ class VAMediaPlayer(val context: Context) {
             // Apply ducking to currently playing media
             mediaPlayer?.let { player ->
                 if (player.isPlaying) {
-                    val targetVol = Math.min(currentVolume, config.duckingVolume)
-                    if (targetVol < currentVolume) {
-                        Timber.d("Ducking music volume from $currentVolume to $targetVol")
-                        player.volume = (targetVol / maxVolume.toFloat())
-                    }
+                    val reduction = config.duckingVolume / 100.0
+                    val targetVol = (1.0 - reduction).toFloat()
+                    Timber.d("Ducking music volume to relative level $targetVol (${config.duckingVolume}% reduction)")
+                    player.volume = targetVol
                 }
             }
         }
@@ -166,8 +152,11 @@ class VAMediaPlayer(val context: Context) {
                     return@post
                 }
                 
-                // Snapshot the volumes to be used by the background thread
-                (player.volume * maxVolume).toInt() to currentVolume
+                // Snapshot the volumes (as relative gain) to be used by the background thread
+                val vReduction = config.duckingVolume / 100.0
+                val vStart = (1.0 - vReduction).toFloat()
+                val vTarget = 1.0f
+                vStart to vTarget
             }
             
             if (vStart >= vTarget) {
@@ -183,7 +172,7 @@ class VAMediaPlayer(val context: Context) {
                     for (i in 1..steps) {
                         val v = vStart + (diffStep * i)
                         mainHandler.post {
-                            mediaPlayer?.volume = (v / maxVolume.toFloat())
+                            mediaPlayer?.volume = v
                         }
                         if (i < steps) {
                             Thread.sleep(200)

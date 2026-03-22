@@ -45,13 +45,13 @@ class SatelliteActionHandler(
         if (url.isNotEmpty()) {
             val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
             mediaHandler.musicPlayer.play(url)
-            mediaHandler.musicPlayer.setVolume(volume)
+            config.musicVolume = volume
         }
     }
 
     private fun executeSetVolume(payload: JsonObject) {
         val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
-        mediaHandler.musicPlayer.setVolume(volume)
+        config.musicVolume = volume
     }
 
     private fun executeToast(payload: JsonObject) {

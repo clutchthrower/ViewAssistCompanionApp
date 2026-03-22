@@ -634,7 +634,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             }
 
             this.setTurnScreenOn(true)
-
             screen.wakeScreen()
         }
 
@@ -1009,6 +1008,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
 
         super.onTrimMemory(level)
+    }
+
+    override fun setTurnScreenOn(turnScreenOn: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            super.setTurnScreenOn(turnScreenOn)
+        }
     }
 }
 
