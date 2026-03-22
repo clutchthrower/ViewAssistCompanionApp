@@ -15,7 +15,8 @@ class WyomingMessenger(
     private val reader: DataInputStream,
     private val writer: DataOutputStream,
     private val version: String,
-    private val log: Logger = Logger()
+    private val log: Logger = Logger(),
+    private val checkRunning: () -> Boolean = { true }
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -29,7 +30,7 @@ class WyomingMessenger(
             log.d("Sending to $clientId: ${packet.toMap()}")
         }
         
-        // Ensure session_id is included in the data sent to the client if present in the packet.
+        // Ensure session_id is included in the data if present in packet
         val outboundData = if (packet.sessionId != null && packet.data["session_id"] == null) {
             buildJsonObject {
                 packet.data.forEach { (k, v) -> put(k, v) }
@@ -44,18 +45,14 @@ class WyomingMessenger(
         val header = buildJsonObject {
             put("type", packet.type)
             put("version", version)
-            if (dataBytes.isNotEmpty()) {
-                put("data_length", dataBytes.size)
-            }
-            if (packet.payload.isNotEmpty()) {
-                put("payload_length", packet.payload.size)
-            }
+            if (dataBytes.isNotEmpty()) put("data_length", dataBytes.size)
+            if (packet.payload.isNotEmpty()) put("payload_length", packet.payload.size)
         }
 
-        val jsonLine = header.toString() + "\n"
+        val jsonLine = "$header\n".toByteArray(Charsets.UTF_8)
 
         try {
-            writer.write(jsonLine.toByteArray(Charsets.UTF_8))
+            writer.write(jsonLine)
             if (dataBytes.isNotEmpty()) writer.write(dataBytes)
             if (packet.payload.isNotEmpty()) writer.write(packet.payload)
             writer.flush()
@@ -71,51 +68,58 @@ class WyomingMessenger(
     /**
      * Reads the next Wyoming packet from the peer.
      * Blocks until a full packet is available or connection is lost.
+     * @throws IOException if connection is lost or protocol error occurs.
      */
     fun readEvent(): WyomingPacket? {
-        try {
-            val jsonString = StringBuilder()
-            var byte = reader.read()
-            if (byte == -1) throw java.io.EOFException("Connection closed by peer")
+        val jsonString = StringBuilder()
+        var byte = reader.read()
+        
+        if (byte == -1) throw java.io.EOFException("Connection closed by peer")
 
-            while (byte != -1 && byte != '\n'.code) {
-                jsonString.append(byte.toChar())
-                byte = reader.read()
-            }
-            if (byte == -1 && jsonString.isEmpty()) return null
-            if (byte == -1) throw java.io.EOFException("Connection lost during header read")
-
-            val header = json.parseToJsonElement(jsonString.toString()).jsonObject
-            val type = header["type"]?.jsonPrimitive?.content ?: return null
-            
-            val dataLength = header["data_length"]?.jsonPrimitive?.intOrNull ?: 0
-            val data = if (dataLength > 0) {
-                val dataBytes = ByteArray(dataLength)
-                reader.readFully(dataBytes)
-                json.parseToJsonElement(String(dataBytes)).jsonObject
-            } else {
-                header["data"]?.jsonObject ?: buildJsonObject {}
-            }
-
-            // Support both session_id and sessionId for compatibility
-            val sessionId = data["session_id"]?.jsonPrimitive?.intOrNull 
-                ?: data["sessionId"]?.jsonPrimitive?.intOrNull
-                ?: header["session_id"]?.jsonPrimitive?.intOrNull
-
-            val packet = WyomingPacket(type, data, sessionId = sessionId)
-            val payloadLength = header["payload_length"]?.jsonPrimitive?.intOrNull ?: 0
-            if (payloadLength != 0) {
-                val payloadBytes = ByteArray(payloadLength)
-                reader.readFully(payloadBytes)
-                packet.payload = payloadBytes
-            }
-            return packet
-
-        } catch (ex: java.io.EOFException) {
-            throw ex
-        } catch (ex: Exception) {
-            log.e("Event read exception: ${ex.message}")
+        while (checkRunning() && byte != -1 && byte != '\n'.code) {
+            jsonString.append(byte.toChar())
+            byte = reader.read()
         }
-        return null
+        
+        if (!checkRunning()) return null
+        if (byte == -1 && jsonString.isEmpty()) return null
+        if (byte == -1) throw java.io.EOFException("Connection lost during header read")
+
+        val headerString = jsonString.toString()
+        val header = try {
+            json.parseToJsonElement(headerString).jsonObject
+        } catch (ex: Exception) {
+            throw java.io.IOException("Malformed Wyoming header: $headerString", ex)
+        }
+
+        val type = header["type"]?.jsonPrimitive?.content ?: throw java.io.IOException("Missing type in Wyoming header")
+        
+        val dataLength = header["data_length"]?.jsonPrimitive?.intOrNull ?: 0
+        val data = if (dataLength > 0) {
+            val dataBytes = ByteArray(dataLength)
+            reader.readFully(dataBytes)
+            try {
+                json.parseToJsonElement(String(dataBytes)).jsonObject
+            } catch (ex: Exception) {
+                log.e("Failed to parse Wyoming data payload: $ex")
+                buildJsonObject {}
+            }
+        } else {
+            header["data"]?.jsonObject ?: buildJsonObject {}
+        }
+
+        // Support both session_id and sessionId for compatibility
+        val sessionId = data["session_id"]?.jsonPrimitive?.intOrNull 
+            ?: data["sessionId"]?.jsonPrimitive?.intOrNull
+            ?: header["session_id"]?.jsonPrimitive?.intOrNull
+
+        val packet = WyomingPacket(type, data, sessionId = sessionId)
+        val payloadLength = header["payload_length"]?.jsonPrimitive?.intOrNull ?: 0
+        if (payloadLength != 0) {
+            val payloadBytes = ByteArray(payloadLength)
+            reader.readFully(payloadBytes)
+            packet.payload = payloadBytes
+        }
+        return packet
     }
 }

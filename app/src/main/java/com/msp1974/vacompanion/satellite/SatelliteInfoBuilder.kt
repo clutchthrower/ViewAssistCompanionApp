@@ -75,9 +75,9 @@ class SatelliteInfoBuilder(
                 put("area", "")
                 put("has_vad", false)
                 putJsonObject("snd_format") {
-                    put("channels", 1)
-                    put("rate", 16000)
-                    put("width", 2)
+                    put("channels", config.audioChannels)
+                    put("rate", config.sampleRate)
+                    put("width", config.audioWidth)
                 }
                 putJsonArray("active_wake_words") { add(JsonPrimitive(config.wakeWord)) }
                 put("max_active_wake_words", 1)

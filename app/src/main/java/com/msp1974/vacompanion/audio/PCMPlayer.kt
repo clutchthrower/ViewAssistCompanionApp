@@ -15,7 +15,7 @@ class PCMMediaPlayer(context: Context) {
     private val bufferSize = frameSize * channelCount * bytesPerSample
     private val buffer = ByteArray(bufferSize)
     private var audioTrack: AudioTrack? = null
-    var isPlaying = false
+    @Volatile var isPlaying = false
 
     private fun createAudioTrack(): AudioTrack {
         val channels = if (channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO

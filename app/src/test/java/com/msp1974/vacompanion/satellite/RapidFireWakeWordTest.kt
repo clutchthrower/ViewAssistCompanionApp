@@ -93,7 +93,7 @@ class RapidFireWakeWordTest {
         }, sessionId = 1))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}, sessionId = 1))
         
-        assertEquals(PipelineStage.STREAMING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.STREAMING, clientHandler.pipelineStage)
         
         // 3. Rapid fire second wake word detection
         // Note: handleBroadcastIntent in real usage calls stop() on media playback before onWakeWordDetected
@@ -113,7 +113,7 @@ class RapidFireWakeWordTest {
         // 6. Simulate Session 2 starting to listen
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}, sessionId = 2))
         
-        assertEquals(PipelineStage.LISTENING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.LISTENING, clientHandler.pipelineStage)
         
         // --- THE PROBLEM ---
         // At this point, Session 2 is LISTENING (expecting user input for the NEW request)
@@ -121,7 +121,7 @@ class RapidFireWakeWordTest {
         // If the user waits for that audio to finish before speaking, Session 2 might time out!
         
         // Let's verify that Session 2 is indeed listening even though we just had a "question" from Session 1
-        assertEquals(PipelineStage.LISTENING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.LISTENING, clientHandler.pipelineStage)
     }
 
     @Test
@@ -160,7 +160,7 @@ class RapidFireWakeWordTest {
         // 1. Start Session 1 and reach LISTENING stage
         clientHandler.onWakeWordDetected()
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        assertEquals(PipelineStage.LISTENING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.LISTENING, clientHandler.pipelineStage)
         
         // 2. Interrupt with new wake word
         clientHandler.onWakeWordDetected() // S1 stops.
@@ -185,7 +185,7 @@ class RapidFireWakeWordTest {
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
-        assertEquals(PipelineStage.STREAMING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.STREAMING, clientHandler.pipelineStage)
         
         // 2. Interrupt with new wake word
         clientHandler.onWakeWordDetected()

@@ -80,7 +80,7 @@ class SatelliteClientHandlerTest {
             client = socket,
             log = log,
             config = config,
-            messenger = messenger,
+            providedMessenger = messenger,
             mediaHandler = mediaHandler,
             actionHandler = actionHandler,
             infoBuilder = infoBuilder,
@@ -251,7 +251,7 @@ class SatelliteClientHandlerTest {
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
         
         verify(timeout = 1000) {
-            log.d(match { it.contains("Interrupting current session") })
+            log.d(match { it.contains("Interrupting session") })
             messenger.sendEvent(match { it.type == "detection" })
             messenger.sendEvent(match { it.type == "run-pipeline" })
         }

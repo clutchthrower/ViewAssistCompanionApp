@@ -12,7 +12,7 @@ import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.Logger
-import com.msp1974.vacompanion.wyoming.PipelineStage
+import com.msp1974.vacompanion.wyoming.WyomingPipelineStage
 import com.msp1974.vacompanion.wyoming.WyomingClient
 import com.msp1974.vacompanion.wyoming.WyomingMessenger
 import com.msp1974.vacompanion.wyoming.WyomingPacket
@@ -21,6 +21,7 @@ import kotlinx.serialization.json.*
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
+import java.io.IOException
 import java.net.Socket
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -31,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Concrete implementation of a Wyoming client using TCP transport.
  * Orchestrates the connection, handles Wyoming protocol messaging, 
- * and delegates voice interaction logic to the SessionCoordinator.
+ * and delegates voice interaction logic to the SatelliteSessionCoordinator.
  */
 class SatelliteClientHandler(
     private val context: Context,
@@ -39,13 +40,7 @@ class SatelliteClientHandler(
     private val client: Socket,
     private val log: Logger = Logger(),
     private val config: APPConfig = APPConfig.getInstance(context),
-    private val messenger: WyomingMessenger = WyomingMessenger(
-        client.port,
-        DataInputStream(client.getInputStream()),
-        DataOutputStream(client.getOutputStream()),
-        config.version,
-        log
-    ),
+    providedMessenger: WyomingMessenger? = null,
     private val mediaHandler: SatelliteMediaHandler = SatelliteMediaHandler(context),
     private val actionHandler: SatelliteActionHandler = SatelliteActionHandler(context, config, mediaHandler, log),
     private val infoBuilder: SatelliteInfoBuilder = SatelliteInfoBuilder(context, config, server.getDeviceInfo()),
@@ -63,10 +58,19 @@ class SatelliteClientHandler(
 
     // State Management
     private val isRunning = AtomicBoolean(true)
+
+    private val messenger: WyomingMessenger = providedMessenger ?: WyomingMessenger(
+        client.port,
+        DataInputStream(client.getInputStream()),
+        DataOutputStream(client.getOutputStream()),
+        config.version,
+        log,
+        checkRunning = { isRunning.get() }
+    )
     @Volatile private var satelliteState = SatelliteState.STOPPED
     private val missedPongs = AtomicInteger(0)
     
-    private val sessionCoordinator: SessionCoordinator
+    private val sessionCoordinator: SatelliteSessionCoordinator
     
     // Health Tracking
     private companion object {
@@ -75,7 +79,7 @@ class SatelliteClientHandler(
     }
 
     init {
-        sessionCoordinator = SessionCoordinator(log, object : VoiceSession.Callback {
+        sessionCoordinator = SatelliteSessionCoordinator(log, object : SatelliteVoiceSession.Callback {
             override fun sendEvent(packet: WyomingPacket) = this@SatelliteClientHandler.sendRawEvent(packet)
 
             override fun onRequestAudioStream() {
@@ -118,11 +122,11 @@ class SatelliteClientHandler(
                 mainHandler.removeCallbacks(pipelineTimeoutRunnable)
             }
 
-            override fun initiatePipeline(session: VoiceSession, isContinue: Boolean) {
+            override fun initiatePipeline(session: SatelliteVoiceSession, isContinue: Boolean) {
                 initiateInteraction(session, precedeWithWakeDetection = !isContinue)
             }
             
-            override fun onSessionFinalized(session: VoiceSession) {
+            override fun onSessionFinalized(session: SatelliteVoiceSession) {
                 this@SatelliteClientHandler.sessionCoordinator.onSessionFinalized(session)
                 if (session.needsContinue) {
                     notifyContinueConversation()
@@ -131,8 +135,11 @@ class SatelliteClientHandler(
         })
     }
 
-    val pipelineStage: PipelineStage
-        get() = sessionCoordinator.activeSession?.stage ?: PipelineStage.IDLE
+    val pipelineStage: WyomingPipelineStage
+        get() = sessionCoordinator.activeSession?.stage ?: WyomingPipelineStage.IDLE
+    
+    override fun isActive(): Boolean = 
+        sessionCoordinator.isActive() || mediaHandler.musicPlayer.isPlaying || mediaHandler.alarmPlayer.isSounding || mediaHandler.pcmMediaPlayer.isPlaying
 
     private var pingTimer: Timer? = null
     private val pipelineTimeoutRunnable = Runnable { 
@@ -162,14 +169,16 @@ class SatelliteClientHandler(
         
         try {
             while (isRunning.get() && !client.isClosed) {
-                val packet = messenger.readEvent() ?: continue
+                val packet = messenger.readEvent() ?: break
                 missedPongs.set(0) // Connection is alive
                 processPacket(packet)
             }
         } catch (_: EOFException) {
             log.d("Connection $clientId closed by peer.")
+        } catch (ex: IOException) {
+            log.e("Connection $clientId lost: ${ex.message}")
         } catch (ex: Exception) {
-            if (isRunning.get()) log.e("Connection $clientId terminated due to exception: $ex")
+            if (isRunning.get()) log.e("Connection $clientId terminated unexpectedly: $ex")
         } finally {
             stop()
         }
@@ -182,70 +191,61 @@ class SatelliteClientHandler(
         stopPingTimer()
 
         if (satelliteState == SatelliteState.RUNNING) {
-            stopSatelliteInternal()
+            stopSatelliteService()
         }
         
-        mediaHandler.release()
-        sendExecutor.shutdown()
-        runCatching { sendExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
-        
-        broadcastExecutor.shutdown()
-        runCatching { broadcastExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
-
-        runCatching { client.close() }
-        
-        val remaining = config.atomicConnectionCount.decrementAndGet()
-        log.w("$connectionId:$clientId disconnected. Remaining connections: $remaining")
+        cleanupResources()
     }
 
-    private fun startSatellite() {
-        val currentVer = config.version.toVersion()
-        val minVer = config.minRequiredApkVersion.toVersion()
-        
-        if (currentVer < minVer) {
-            log.d("Update required. App version: $currentVer, Minimum: $minVer")
+    private fun startSatelliteService() {
+        if (config.version.toVersion() < config.minRequiredApkVersion.toVersion()) {
+            log.d("Update required. App version: ${config.version}, Minimum: ${config.minRequiredApkVersion}")
             BroadcastSender.sendBroadcast(context, BroadcastSender.VERSION_MISMATCH)
             return
         }
 
         synchronized(server) {
             if (config.pairedDeviceID.isEmpty()) config.pairedDeviceID = connectionId
-
-            if (config.pairedDeviceID == connectionId) {
-                log.d("Starting satellite service for $clientId")
-                LocalBroadcastManager.getInstance(context).registerReceiver(wakeWordReceiver, intentFilter)
-                config.homeAssistantConnectedIP = connectionId
-
-                handleAlarmAction(false)
-                mediaHandler.musicPlayer.stop()
-                sessionCoordinator.reset()
-
-                val oldClient = server.pipelineClient as? SatelliteClientHandler
-                if (oldClient != null && oldClient != this) {
-                    log.d("Satellite session takeover by $clientId from ${oldClient.clientId}")
-                    oldClient.stop()
-                }
-                
-                server.pipelineClient = this
-                satelliteState = SatelliteState.RUNNING
-                server.onSatelliteStarted()
-                log.d("Satellite session started for $clientId")
-            } else {
+            if (config.pairedDeviceID != connectionId) {
                 log.i("Unauthorized connection attempt from $connectionId:$clientId. Aborting.")
                 stop()
+                return
             }
+
+            performTakeoverIfNeeded()
+            
+            log.d("Starting satellite service for $clientId")
+            LocalBroadcastManager.getInstance(context).registerReceiver(wakeWordReceiver, intentFilter)
+            config.homeAssistantConnectedIP = connectionId
+
+            handleAlarmAction(enable = false)
+            mediaHandler.musicPlayer.stop()
+            sessionCoordinator.reset()
+
+            server.pipelineClient = this
+            satelliteState = SatelliteState.RUNNING
+            server.onSatelliteStarted()
+            config.isRunning = true
+            log.d("Satellite session started for $clientId")
         }
-        config.isRunning = satelliteState == SatelliteState.RUNNING
     }
 
-    private fun stopSatelliteInternal() {
+    private fun performTakeoverIfNeeded() {
+        val oldClient = server.pipelineClient as? SatelliteClientHandler
+        if (oldClient != null && oldClient != this) {
+            log.d("Satellite session takeover by $clientId from ${oldClient.clientId}")
+            oldClient.stop()
+        }
+    }
+
+    private fun stopSatelliteService() {
         log.d("Stopping satellite service for $clientId")
         LocalBroadcastManager.getInstance(context).unregisterReceiver(wakeWordReceiver)
         
         synchronized(server) {
             if (server.pipelineClient == this) {
-                if (pipelineStage == PipelineStage.LISTENING) server.releaseInputAudioStream()
-                handleAlarmAction(false)
+                if (pipelineStage == WyomingPipelineStage.LISTENING) server.releaseInputAudioStream()
+                handleAlarmAction(enable = false)
                 mediaHandler.musicPlayer.stop()
                 server.pipelineClient = null
                 server.onSatelliteStopped()
@@ -253,8 +253,20 @@ class SatelliteClientHandler(
             }
             sessionCoordinator.reset()
             satelliteState = SatelliteState.STOPPED
+            config.isRunning = false
         }
-        config.isRunning = false
+    }
+
+    private fun cleanupResources() {
+        mediaHandler.release()
+        sendExecutor.shutdown()
+        runCatching { sendExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
+        broadcastExecutor.shutdown()
+        runCatching { broadcastExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
+        runCatching { client.close() }
+        
+        val remaining = config.atomicConnectionCount.decrementAndGet()
+        log.w("$connectionId:$clientId disconnected. Remaining connections: $remaining")
     }
 
     // endregion
@@ -269,23 +281,60 @@ class SatelliteClientHandler(
         try {
             when (packet.type) {
                 "ping" -> sendPong()
-                "pong" -> { /* Already handled by read loop reset */ }
+                "pong" -> {} // Explicitly ignore, handled by missedPongs reset in read loop
                 "describe" -> sendInfo()
                 "capabilities" -> sendCapabilities()
-                "run-satellite" -> startSatellite()
-                "pause-satellite" -> if (satelliteState == SatelliteState.RUNNING) stopSatelliteInternal()
+                "run-satellite" -> startSatelliteService()
+                "pause-satellite" -> if (satelliteState == SatelliteState.RUNNING) stopSatelliteService()
                 "settings", "custom-settings" -> processSettingsPacket(packet)
-                "action", "custom-action" -> handleCustomAction(packet)
-                "custom-event" -> handleCustomEvent(packet)
+                "action", "custom-action" -> handleActionPacket(packet)
+                "custom-event" -> handleCustomEventPacket(packet)
+                "timer-finished" -> if (satelliteState == SatelliteState.RUNNING) handleAlarmAction(enable = true)
+                else -> {
+                    // All other packets are potentially interaction-related
+                    if (satelliteState == SatelliteState.RUNNING) {
+                        sessionCoordinator.processPacket(packet)
+                    }
+                }
             }
-
-            if (satelliteState == SatelliteState.RUNNING) {
-                if (packet.type == "timer-finished") handleAlarmAction(true)
-                sessionCoordinator.processPacket(packet)
-            }
-            
         } catch (ex: Exception) {
             log.e("Error processing event ${packet.type}: $ex")
+        }
+    }
+
+    private fun handleActionPacket(packet: WyomingPacket) {
+        actionHandler.handleAction(packet.getProp("action"), packet.getProp("payload")) { enable, url ->
+            handleAlarmAction(enable, url)
+        }
+    }
+
+    private fun handleCustomEventPacket(packet: WyomingPacket) {
+        val eventType = packet.getProp("event_type")
+        val eventData = packet.getJsonObject("data") ?: packet.data
+
+        // Sync forceContinue if found in custom event (protocol artifact)
+        extractForceContinue(eventData)
+
+        val innerPacket = WyomingPacket(eventType, eventData)
+        when (eventType) {
+            "action" -> handleActionPacket(innerPacket)
+            "settings" -> processSettingsPacket(innerPacket)
+            "capabilities" -> sendCapabilities()
+            else -> {
+                actionHandler.handleAction(eventType, eventData.toString()) { enable, url ->
+                    handleAlarmAction(enable, url)
+                }
+            }
+        }
+    }
+
+    private fun extractForceContinue(data: JsonObject) {
+        data["intent_output"]?.jsonObject?.let { output ->
+            output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { value ->
+                sessionCoordinator.activeSession?.let { session ->
+                    sessionCoordinator.setForceContinue(session.id, value)
+                }
+            }
         }
     }
 
@@ -314,37 +363,6 @@ class SatelliteClientHandler(
         config.processSettings(settingsStr)
     }
 
-    private fun handleCustomEvent(event: WyomingPacket) {
-        val eventData = event.data["data"]?.jsonObject ?: event.data
-        val eventType = event.getProp("event_type")
-
-        // Sync forceContinue if found in custom event
-        eventData["intent_output"]?.jsonObject?.let { output ->
-            output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { value ->
-                sessionCoordinator.activeSession?.let { session ->
-                    sessionCoordinator.setForceContinue(session.id, value)
-                }
-            }
-        }
-
-        val innerPacket = WyomingPacket(eventType, eventData)
-        when (eventType) {
-            "action" -> handleCustomAction(innerPacket)
-            "settings" -> processSettingsPacket(innerPacket)
-            "capabilities" -> sendCapabilities()
-            else -> {
-                actionHandler.handleAction(eventType, eventData.toString()) { enable, url ->
-                    handleAlarmAction(enable, url)
-                }
-            }
-        }
-    }
-
-    private fun handleCustomAction(event: WyomingPacket) {
-        actionHandler.handleAction(event.getProp("action"), event.getProp("payload")) { enable, url ->
-            handleAlarmAction(enable, url)
-        }
-    }
 
     private fun handleAlarmAction(enable: Boolean, url: String = "") {
         if (enable) {
@@ -388,7 +406,7 @@ class SatelliteClientHandler(
 
     fun sendInfo() = sendRawEvent(WyomingPacket("info", infoBuilder.buildInfo()))
 
-    fun initiateInteraction(session: VoiceSession? = null, precedeWithWakeDetection: Boolean = true) {
+    fun initiateInteraction(session: SatelliteVoiceSession? = null, precedeWithWakeDetection: Boolean = true) {
         val targetSession = session ?: sessionCoordinator.activeSession ?: return
         
         val runPipelinePacket = WyomingPacket(
@@ -426,7 +444,7 @@ class SatelliteClientHandler(
 
     override fun sendAudio(audio: ByteArray) {
         val session = sessionCoordinator.activeSession ?: return
-        if (session.stage != PipelineStage.LISTENING) return
+        if (session.stage != WyomingPipelineStage.LISTENING) return
 
         val data = buildJsonObject {
             put("rate", config.sampleRate)
@@ -480,7 +498,7 @@ class SatelliteClientHandler(
                 return@execute
             }
             
-            if (packet.type == "audio-chunk" && pipelineStage != PipelineStage.LISTENING) {
+            if (packet.type == "audio-chunk" && pipelineStage != WyomingPipelineStage.LISTENING) {
                 return@execute
             }
             // ---------------------------

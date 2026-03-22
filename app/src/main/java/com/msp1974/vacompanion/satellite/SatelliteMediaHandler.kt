@@ -26,6 +26,7 @@ class SatelliteMediaHandler(context: Context) {
     /**
      * Ducks or unducks other audio streams to prioritize voice interaction.
      */
+    @Synchronized
     fun updateVolumeDucking(key: String, duck: Boolean) {
         when (key) {
             "music" -> {

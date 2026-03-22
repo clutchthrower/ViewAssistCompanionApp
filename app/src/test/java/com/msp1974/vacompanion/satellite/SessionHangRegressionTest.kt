@@ -105,7 +105,7 @@ class SessionHangRegressionTest {
         // Session stays active because it's still streaming TTS.
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}, sessionId = 1))
         
-        assertEquals(PipelineStage.STREAMING, clientHandler.pipelineStage)
+        assertEquals(WyomingPipelineStage.STREAMING, clientHandler.pipelineStage)
         
         // 3. New Wake word detected.
         // This should interrupt Session 1 and start Session 2 immediately.

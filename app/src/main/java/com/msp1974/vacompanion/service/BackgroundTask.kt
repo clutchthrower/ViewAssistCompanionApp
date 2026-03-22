@@ -409,8 +409,8 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
                     is WakeWordEngineProvider.AudioResult.StopDetected -> {
                         if (it.detection.detected) {
-                            Timber.d("Stop word detected: ${it.detection.wakeWord}")
-                            if (it.detection.score > 0.5) {
+                            if (it.detection.score > 0.5 && server.pipelineClient?.isActive() == true) {
+                                Timber.d("Stop word detected: ${it.detection.wakeWord} (Score: ${it.detection.score})")
                                 BroadcastSender.sendBroadcast(
                                     context,
                                     BroadcastSender.STOP_WORD_DETECTED

@@ -16,34 +16,63 @@ class SatelliteActionHandler(
     private val mediaHandler: SatelliteMediaHandler,
     private val log: Logger = Logger()
 ) {
+    private val json = Json { ignoreUnknownKeys = true }
+
     fun handleAction(action: String, payloadStr: String, alarmCallback: (Boolean, String) -> Unit) {
         runCatching {
+            val payload = if (payloadStr.isNotEmpty()) {
+                json.parseToJsonElement(payloadStr).jsonObject
+            } else buildJsonObject {}
+
             when (action) {
-                "play-media" -> if (payloadStr.isNotEmpty()) {
-                    val payload = Json.parseToJsonElement(payloadStr).jsonObject
-                    mediaHandler.musicPlayer.play(payload["url"]?.jsonPrimitive?.content ?: "")
-                    mediaHandler.musicPlayer.setVolume(payload["volume"]?.jsonPrimitive?.intOrNull ?: 100)
-                }
+                "play-media" -> executePlayMedia(payload)
                 "play" -> mediaHandler.musicPlayer.resume()
                 "pause" -> mediaHandler.musicPlayer.pause()
                 "stop" -> mediaHandler.musicPlayer.stop()
-                "set-volume" -> if (payloadStr.isNotEmpty()) {
-                    val payload = Json.parseToJsonElement(payloadStr).jsonObject
-                    mediaHandler.musicPlayer.setVolume(payload["volume"]?.jsonPrimitive?.intOrNull ?: 100)
-                }
-                "toast-message" -> if (payloadStr.isNotEmpty()) {
-                    val msg = Json.parseToJsonElement(payloadStr).jsonObject["message"]?.jsonPrimitive?.content ?: ""
-                    BroadcastSender.sendBroadcast(context, BroadcastSender.TOAST_MESSAGE, msg)
-                }
-                "refresh" -> config.eventBroadcaster.notifyEvent(Event("refresh", "", ""))
-                "screen-wake" -> config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
-                "screen-sleep" -> config.eventBroadcaster.notifyEvent(Event("screenSleep", "", ""))
-                "wake" -> config.eventBroadcaster.notifyEvent(Event("wakeWordTrigger", "", ""))
-                "alarm" -> if (payloadStr.isNotEmpty()) {
-                    val payload = Json.parseToJsonElement(payloadStr).jsonObject
-                    alarmCallback(payload["activate"]?.jsonPrimitive?.booleanOrNull ?: false, payload["url"]?.jsonPrimitive?.contentOrNull ?: "")
-                }
+                "set-volume" -> executeSetVolume(payload)
+                "toast-message" -> executeToast(payload)
+                "refresh", "screen-wake", "screen-sleep", "wake" -> executeNotify(action)
+                "alarm" -> executeAlarm(payload, alarmCallback)
+                else -> log.w("Received unknown action from server: $action")
             }
-        }.onFailure { log.e("Failed to handle custom action $action: $it") }
+        }.onFailure { 
+            log.e("Failed to handle action $action (payload: $payloadStr): $it")
+        }
+    }
+
+    private fun executePlayMedia(payload: JsonObject) {
+        val url = payload["url"]?.jsonPrimitive?.content ?: ""
+        if (url.isNotEmpty()) {
+            val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
+            mediaHandler.musicPlayer.play(url)
+            mediaHandler.musicPlayer.setVolume(volume)
+        }
+    }
+
+    private fun executeSetVolume(payload: JsonObject) {
+        val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
+        mediaHandler.musicPlayer.setVolume(volume)
+    }
+
+    private fun executeToast(payload: JsonObject) {
+        val msg = payload["message"]?.jsonPrimitive?.content ?: ""
+        BroadcastSender.sendBroadcast(context, BroadcastSender.TOAST_MESSAGE, msg)
+    }
+
+    private fun executeNotify(type: String) {
+        val eventType = when (type) {
+            "refresh" -> "refresh"
+            "screen-wake" -> "screenWake"
+            "screen-sleep" -> "screenSleep"
+            "wake" -> "wakeWordTrigger"
+            else -> return
+        }
+        config.eventBroadcaster.notifyEvent(Event(eventType, "", ""))
+    }
+
+    private fun executeAlarm(payload: JsonObject, callback: (Boolean, String) -> Unit) {
+        val activate = payload["activate"]?.jsonPrimitive?.booleanOrNull ?: false
+        val url = payload["url"]?.jsonPrimitive?.contentOrNull ?: ""
+        callback(activate, url)
     }
 }

@@ -8,15 +8,27 @@ import kotlin.concurrent.thread
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.annotation.GuardedBy
+import androidx.media3.common.Player
 
 
 class VAMediaPlayer(val context: Context) {
     private val config: APPConfig = APPConfig.getInstance(context)
-    private var currentVolume: Int = config.musicVolume
+    @Volatile private var currentVolume: Int = config.musicVolume
     private var mediaPlayer: ExoPlayer? = null
-    var isVolumeDucked: Boolean = false
-    var playRequested: Boolean = false
-    val maxVolume = AudioManager(context).getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+    
+    @GuardedBy("this")
+    private var isVolumeDucked: Boolean = false
+    
+    private var playRequested: Boolean = false
+    private val maxVolume = AudioManager(context).getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+    
+    private val mainHandler = Handler(context.mainLooper)
+    private var unduckThread: Thread? = null
+    @Volatile private var isActuallyPlaying: Boolean = false
+
+    val isPlaying: Boolean
+        get() = isActuallyPlaying
 
     companion object {
         @Volatile
@@ -29,114 +41,164 @@ class VAMediaPlayer(val context: Context) {
     }
 
     fun play(url: String) {
-        Handler(context.mainLooper).post({
+        mainHandler.post {
             try {
                 if (playRequested) {
-                    mediaPlayer!!.stop()
+                    mediaPlayer?.stop()
+                    mediaPlayer?.release()
                 }
-            } catch (e: IllegalStateException) {
-                // Here is media player is stopped
+            } catch (e: Exception) {
+                Timber.e("Error stopping existing player: $e")
             }
 
             playRequested = true
 
             try {
-                mediaPlayer = ExoPlayer.Builder(context).build()
+                val player = ExoPlayer.Builder(context).build()
+                mediaPlayer = player
+                
                 val mediaItem = MediaItem.fromUri(url.toUri())
-                mediaPlayer!!.setMediaItem(mediaItem)
-                // Prepare the player.
-                mediaPlayer!!.prepare()
-                // Start the playback.
-                mediaPlayer!!.play()
-                Timber.i("Music started")
+                player.setMediaItem(mediaItem)
+                
+                // Initialize volume based on current ducking status
+                // If ducked, ensure we don't boost volume if current is already lower than target
+                val baseVol = if (synchronized(this) { isVolumeDucked }) {
+                    Math.min(currentVolume, config.duckingVolume)
+                } else currentVolume
+                player.volume = (baseVol / maxVolume.toFloat())
+                
+                player.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        this@VAMediaPlayer.isActuallyPlaying = isPlaying
+                    }
+                })
+                
+                player.prepare()
+                player.play()
+                Timber.i("Music started (Initial volume: $baseVol)")
             } catch (ex: Exception) {
                 Timber.e("Error playing music: $ex")
-                ex.printStackTrace()
+                playRequested = false
             }
-        })
+        }
     }
 
     fun pause() {
-        Handler(context.mainLooper).post({
-            try {
-                mediaPlayer!!.pause()
-                Timber.i("Music paused")
-            } catch (ex: Exception) {
-                Timber.e("Error pausing music: $ex")
-            }
-        })
+        mainHandler.post {
+            mediaPlayer?.pause()
+            Timber.i("Music paused")
+        }
     }
 
     fun resume() {
-        Handler(context.mainLooper).post({
-            try {
-                mediaPlayer!!.play()
-                Timber.i("Music resumed")
-            } catch (ex: Exception) {
-                Timber.e("Error resuming music: $ex")
-            }
-        })
+        mainHandler.post {
+            mediaPlayer?.play()
+            Timber.i("Music resumed")
+        }
     }
 
     fun stop() {
-        Handler(context.mainLooper).post({
+        mainHandler.post {
             try {
                 playRequested = false
-                mediaPlayer!!.stop()
-                mediaPlayer!!.release()
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
                 Timber.i("Music stopped")
-
             } catch (e: Exception) {
                 Timber.e("Error stopping music: $e")
             }
-        })
+        }
     }
 
     fun setVolume(volume: Int) {
-        Handler(context.mainLooper).post({
-            if (!isVolumeDucked && mediaPlayer != null) {
-                val audioMgr = AudioManager(context)
-                mediaPlayer!!.volume = volume / audioMgr.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).toFloat()
+        currentVolume = volume
+        mainHandler.post {
+            val isDucked = synchronized(this) { isVolumeDucked }
+            if (!isDucked) {
+                mediaPlayer?.volume = volume / maxVolume.toFloat()
             }
-            currentVolume = volume
-            Timber.i("Music volume set to $volume")
-        })
+            Timber.i("Music volume set to $volume (State: ${if (isDucked) "Ducked" else "Normal"})")
+        }
     }
 
     fun duckVolume() {
-        Handler(context.mainLooper).post({
-            if (!isVolumeDucked && mediaPlayer != null) {
-                if (mediaPlayer!!.isPlaying) {
-                    val vol = config.duckingVolume
-                    if (vol < config.musicVolume) {
-                        Timber.d("Ducking music volume from $currentVolume to $vol")
-                        mediaPlayer!!.volume = (vol / maxVolume).toFloat()
-                        isVolumeDucked = true
-                    } else {
-                        Timber.d("Not ducking music volume as it is lower than ducking volume of ${config.duckingVolume} at ${config.musicVolume}")
+        mainHandler.post {
+            // Session-level duck: set isVolumeDucked as soon as a voice interaction starts, even if the
+            // current track is already quiet. That way setVolume() only updates currentVolume while the
+            // player stays low (no jump during TTS), and play() can cap initial level for music that
+            // starts mid-session. unDuckVolume() clears the flag even when no fade was needed.
+            // synchronization ensures visibility across the unduck thread vs main thread.
+            synchronized(this) {
+                if (isVolumeDucked) return@synchronized
+                isVolumeDucked = true
+                
+                // Cancel any pending unduck animation
+                unduckThread?.interrupt()
+                unduckThread = null
+            }
+
+            // Apply ducking to currently playing media
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    val targetVol = Math.min(currentVolume, config.duckingVolume)
+                    if (targetVol < currentVolume) {
+                        Timber.d("Ducking music volume from $currentVolume to $targetVol")
+                        player.volume = (targetVol / maxVolume.toFloat())
                     }
                 }
             }
-        })
+        }
     }
 
     fun unDuckVolume() {
-        if (isVolumeDucked) {
-            Timber.i("Restoring music volume to ${currentVolume}")
-            thread(name = "volumeUnducking") {
-                val steps = 3
-                val diffStepVolume = (currentVolume - config.duckingVolume) / steps
-                for (i in 1..steps) {
-                    val vol = config.duckingVolume + (diffStepVolume * i)
-                    Handler(context.mainLooper).post({
-                        mediaPlayer!!.volume = (vol / maxVolume).toFloat()
-                    })
-                    if (i < steps) {
-                        Thread.sleep(250)
+        mainHandler.post {
+            // synchronization here protects against race conditions with concurrent duck requests
+            // and ensures the fade thread captures a stable snapshot of the volume state.
+            val (vStart, vTarget) = synchronized(this) {
+                if (!isVolumeDucked) return@post
+                isVolumeDucked = false
+                unduckThread?.interrupt()
+                
+                val player = mediaPlayer
+                if (player == null || !player.isPlaying) {
+                    Timber.d("Music not playing, skipping unduck fade.")
+                    return@post
+                }
+                
+                // Snapshot the volumes to be used by the background thread
+                (player.volume * maxVolume).toInt() to currentVolume
+            }
+            
+            if (vStart >= vTarget) {
+                Timber.d("Volume already at target level ($vStart vs $vTarget).")
+                return@post
+            }
+
+            val thread = thread(name = "volumeUnducking", start = false) {
+                try {
+                    val steps = 4
+                    val diffStep = (vTarget - vStart) / steps
+                    
+                    for (i in 1..steps) {
+                        val v = vStart + (diffStep * i)
+                        mainHandler.post {
+                            mediaPlayer?.volume = (v / maxVolume.toFloat())
+                        }
+                        if (i < steps) {
+                            Thread.sleep(200)
+                        }
                     }
+                    Timber.i("Restored music volume to $vTarget")
+                } catch (ex: InterruptedException) {
+                    Timber.d("Unducking animation interrupted")
                 }
             }
-            isVolumeDucked = false
+            
+            synchronized(this) {
+                unduckThread = thread
+            }
+            thread.start()
         }
     }
 }
