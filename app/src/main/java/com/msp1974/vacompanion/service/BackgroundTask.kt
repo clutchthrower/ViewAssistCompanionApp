@@ -172,6 +172,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                         audioRoute = AudioRouteOption.DETECT
                     }
                 }
+                try {
+                    soundClipPlayer.play(R.raw.stop_listening)
+                } catch (e: Exception) {
+                    Timber.e("Error playing stopped listening sound: ${e.message.toString()}")
+                }
                 engine?.setStreaming(false)
             }
         })
@@ -573,6 +578,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private fun warmUpAudioResources() {
         soundClipPlayer.prepare(R.raw.error)
         soundClipPlayer.prepare(R.raw.stop_word)
+        soundClipPlayer.prepare(R.raw.stop_listening)
         if (config.wakeWordSound != "none") {
             val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
             if (resId != 0) {
