@@ -54,8 +54,6 @@ class SatelliteClientHandler(
     private val connectionId = client.inetAddress.hostAddress ?: "unknown"
     override val clientId: Int = client.port
     
-    // State Management (Executors provided via constructor)
-
     // State Management
     private val isRunning = AtomicBoolean(true)
 
@@ -105,7 +103,7 @@ class SatelliteClientHandler(
             override fun onUpdateVolumeDucking(key: String, duck: Boolean) = mediaHandler.updateVolumeDucking(key, duck)
 
             override fun notifyContinueConversation(phrase: String) {
-                config.eventBroadcaster.notifyEvent(Event("continueConversationStart", "", ""))
+                config.eventBroadcaster.notifyEvent(Event("continueConversationStart", "", phrase))
                 sessionCoordinator.startContinueConversation()
             }
 
@@ -129,7 +127,7 @@ class SatelliteClientHandler(
             override fun onSessionFinalized(session: SatelliteVoiceSession) {
                 this@SatelliteClientHandler.sessionCoordinator.onSessionFinalized(session)
                 if (session.needsContinue) {
-                    notifyContinueConversation()
+                    notifyContinueConversation(phrase = "")
                 }
             }
         })
@@ -170,7 +168,8 @@ class SatelliteClientHandler(
         try {
             while (isRunning.get() && !client.isClosed) {
                 val packet = messenger.readEvent() ?: break
-                missedPongs.set(0) // Connection is alive
+                // Any successfully read packet proves the link is alive; resets ping watchdog (not pong-specific).
+                missedPongs.set(0)
                 processPacket(packet)
             }
         } catch (_: EOFException) {
@@ -281,7 +280,7 @@ class SatelliteClientHandler(
         try {
             when (packet.type) {
                 "ping" -> sendPong()
-                "pong" -> {} // Explicitly ignore, handled by missedPongs reset in read loop
+                "pong" -> {} // No-op: liveness is tracked via read-loop reset for every packet type
                 "describe" -> sendInfo()
                 "capabilities" -> sendCapabilities()
                 "run-satellite" -> startSatelliteService()
@@ -312,9 +311,6 @@ class SatelliteClientHandler(
         val eventType = packet.getProp("event_type")
         val eventData = packet.getJsonObject("data") ?: packet.data
 
-        // Sync forceContinue if found in custom event (protocol artifact)
-        extractForceContinue(eventData)
-
         val innerPacket = WyomingPacket(eventType, eventData)
         when (eventType) {
             "action" -> handleActionPacket(innerPacket)
@@ -323,16 +319,6 @@ class SatelliteClientHandler(
             else -> {
                 actionHandler.handleAction(eventType, eventData.toString()) { enable, url ->
                     handleAlarmAction(enable, url)
-                }
-            }
-        }
-    }
-
-    private fun extractForceContinue(data: JsonObject) {
-        data["intent_output"]?.jsonObject?.let { output ->
-            output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { value ->
-                sessionCoordinator.activeSession?.let { session ->
-                    sessionCoordinator.setForceContinue(session.id, value)
                 }
             }
         }
@@ -425,6 +411,8 @@ class SatelliteClientHandler(
             sessionId = targetSession.id
         )
 
+        // sendRawEvent also posts to sendExecutor; nested tasks run after this block returns, preserving
+        // order: detection (if any) is queued before run-pipeline on the single-thread executor.
         sendExecutor.execute {
             if (precedeWithWakeDetection) {
                 val detectionPacket = WyomingPacket(

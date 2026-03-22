@@ -182,20 +182,16 @@ class SatelliteClientHandlerTest {
 
 
     @Test
-    fun `test handleSynthesize extracts continue_conversation flag`() {
+    fun `test pipeline-ended continue_conversation triggers follow-up run-pipeline`() {
         clientHandler.onWakeWordDetected()
         verify(timeout = 1000) { messenger.sendEvent(match { it.type == "run-pipeline" }) }
         clearMocks(messenger)
         
-        val synthesizeData = buildJsonObject {
-            putJsonObject("intent_output") {
-                put("continue_conversation", true)
-            }
-        }
-        
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        clientHandler.processPacket(WyomingPacket("synthesize", synthesizeData))
-        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {
+            put("continue_conversation", true)
+        }))
         clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
         
         verify(timeout = 1000) {
@@ -209,13 +205,13 @@ class SatelliteClientHandlerTest {
         
         // 1. Enter LISTENING and then jump to synthesise (releases input stream)
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {
-            putJsonObject("intent_output") { put("continue_conversation", true) }
-        }))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         verify(exactly = 1) { server.releaseInputAudioStream() }
         
-        // 2. Mark logic finished
-        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        // 2. Mark logic finished (continue flag comes on pipeline-ended from server)
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {
+            put("continue_conversation", true)
+        }))
         
         // Verify it didn't initiate continuation yet (because audio isn't done)
         verify(timeout = 1000, exactly = 1) { messenger.sendEvent(match { it.type == "run-pipeline" }) } // only the first run-pipeline

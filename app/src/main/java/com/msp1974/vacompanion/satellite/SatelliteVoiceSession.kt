@@ -168,19 +168,11 @@ class SatelliteVoiceSession(
     }
 
     private fun handleSynthesize(packet: WyomingPacket) {
-        var forceValue: Boolean? = null
-        
+        val fromSynthesize = continueConversationFromSynthesize(packet)
         val shouldRelease = synchronized(this) {
             if (status.stage != WyomingPipelineStage.PROCESSING && status.stage != WyomingPipelineStage.LISTENING) {
                  log.d("Ignoring unexpected synthesize in stage ${status.stage} (Session $id)")
                  return
-            }
-
-            // Extract continue_conversation from nested intent_output
-            packet.data["intent_output"]?.jsonObject?.let { output ->
-                output["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { 
-                    forceValue = it
-                }
             }
 
             val wasRequested = status.isAudioStreamRequested
@@ -188,17 +180,20 @@ class SatelliteVoiceSession(
                 stage = WyomingPipelineStage.AWAITING_TTS, 
                 isExpectingTts = true,
                 isAudioStreamRequested = false,
-                forceContinue = forceValue ?: status.forceContinue
+                forceContinue = fromSynthesize ?: status.forceContinue
             )
             
             wasRequested
+        }
+
+        if (fromSynthesize != null) {
+            log.d("Continue conversation $fromSynthesize from synthesize intent_output (Session $id)")
         }
         
         if (shouldRelease) {
             callback.onReleaseAudioStream()
         }
         
-        forceValue?.let { log.d("Continue conversation set to $it from synthesize event (Session $id)") }
         callback.setPipelineTimeout(20)
     }
 
@@ -222,21 +217,21 @@ class SatelliteVoiceSession(
     }
 
     private fun handleAudioStop() {
-        synchronized(this) {
+        val shouldSendPlayed = synchronized(this) {
             if (status.stage != WyomingPipelineStage.AWAITING_TTS && status.stage != WyomingPipelineStage.STREAMING) {
                 log.d("Ignoring unexpected audio-stop in stage ${status.stage} (Session $id)")
                 return
             }
 
-            if (status.stage == WyomingPipelineStage.STREAMING) {
-                callback.sendEvent(WyomingPacket("played", buildJsonObject {}))
-            }
-            
+            val sendPlayed = status.stage == WyomingPipelineStage.STREAMING
             if (status.isExpectingTts && status.forceContinue) {
                 log.d("Requested conversation continuation (Session $id)")
             }
-            
             status = status.copy(localAudioFinished = true)
+            sendPlayed
+        }
+        if (shouldSendPlayed) {
+            callback.sendEvent(WyomingPacket("played", buildJsonObject {}, sessionId = id))
         }
         checkFinalize()
     }
@@ -247,12 +242,31 @@ class SatelliteVoiceSession(
                 log.d("Ignoring stale pipeline-ended in stage ${status.stage} (Session $id)")
                 return
             }
-            status = status.copy(serverLogicFinished = true)
+            val forceContinue = if (packet.data.containsKey("continue_conversation")) {
+                packet.getBool("continue_conversation")
+            } else {
+                status.forceContinue
+            }
+            status = status.copy(
+                serverLogicFinished = true,
+                forceContinue = forceContinue
+            )
             if (!status.isNaturallyFinished) {
                 log.d("Pipeline logic processing complete. Waiting for local audio/TTS playback (Session $id)")
             }
         }
         checkFinalize()
+    }
+
+    /**
+     * Some Wyoming servers embed [continue_conversation] on synthesize only; well-behaved servers
+     * send it on pipeline-ended. When pipeline-ended omits the key, we keep any value set here.
+     */
+    private fun continueConversationFromSynthesize(packet: WyomingPacket): Boolean? {
+        val intent = packet.getJsonObject("intent_output") ?: return null
+        intent["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { return it }
+        val response = intent["response"] as? JsonObject ?: return null
+        return response["continue_conversation"]?.jsonPrimitive?.booleanOrNull
     }
 
     private fun handlePipelineError(packet: WyomingPacket) {
@@ -279,8 +293,8 @@ class SatelliteVoiceSession(
     }
 
     private fun finalizeAndCleanup() {
-        // Naturally finalizing doesn't need to send audio-stop 
-        // as it's either already sent or we are in a state that doesn't need it.
-        stop(sendAudioStop = false)
+        // Do not call stop(): checkFinalize() already set isFinalized, and stop() returns early
+        // in that case—skipping cleanupResources() (ducking, media, pipeline timeout).
+        cleanupResources()
     }
 }

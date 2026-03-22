@@ -37,20 +37,18 @@ class SatelliteVoiceSessionTest {
         // 1. Initialized
         session.initiate()
         
-        // 2. Synthesize with continue_conversation=true
-        val synthesizeData = buildJsonObject {
-            putJsonObject("intent_output") { put("continue_conversation", true) }
-        }
+        // 2. Synthesize
         session.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        session.processPacket(WyomingPacket("synthesize", synthesizeData))
+        session.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         
         // Stage is AWAITING_TTS, logic is NOT finished, audio is NOT finished
         assertEquals(WyomingPipelineStage.AWAITING_TTS, session.stage)
-        assertTrue(session.needsContinue) // Should be true now
+        assertFalse(session.needsContinue) // Should be false initially
 
-        // 3. Logic ends (pipeline-ended)
-        session.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        // 3. Logic ends (pipeline-ended) with continue_conversation=true
+        session.processPacket(WyomingPacket("pipeline-ended", buildJsonObject { put("continue_conversation", true) }))
         assertTrue(session.logicFinished)
+        assertTrue(session.needsContinue) // Should be true now
         
         // Session should NOT be finalized yet because audio (TTS) hasn't started/stopped
         assertTrue(session.needsContinue)
@@ -61,6 +59,37 @@ class SatelliteVoiceSessionTest {
         
         // 5. Final verification: onSessionFinalized should be called, and at that point needsContinue = true
         verify { callback.onSessionFinalized(match { it.id == 1 && it.needsContinue }) }
+    }
+
+    @Test
+    fun `test synthesize intent_output fallback when pipeline-ended omits continue_conversation`() {
+        session.initiate()
+        session.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        session.processPacket(WyomingPacket("synthesize", buildJsonObject {
+            putJsonObject("intent_output") { put("continue_conversation", true) }
+        }))
+        assertTrue(session.needsContinue)
+
+        session.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        assertTrue(session.logicFinished)
+        assertTrue(session.needsContinue)
+
+        session.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
+        session.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
+        verify { callback.onSessionFinalized(match { it.id == 1 && it.needsContinue }) }
+    }
+
+    @Test
+    fun `test pipeline-ended continue_conversation overrides synthesize intent_output`() {
+        session.initiate()
+        session.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
+        session.processPacket(WyomingPacket("synthesize", buildJsonObject {
+            putJsonObject("intent_output") { put("continue_conversation", true) }
+        }))
+        session.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {
+            put("continue_conversation", false)
+        }))
+        assertFalse(session.needsContinue)
     }
 
     @Test
@@ -102,11 +131,10 @@ class SatelliteVoiceSessionTest {
     fun `test stop interrupts correctly and prevents continuation`() {
         session.initiate()
         
-        // 1. Setup session to want continuation
+        // 1. Setup session
         session.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        session.processPacket(WyomingPacket("synthesize", buildJsonObject {
-            putJsonObject("intent_output") { put("continue_conversation", true) }
-        }))
+        session.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
+        session.processPacket(WyomingPacket("pipeline-ended", buildJsonObject { put("continue_conversation", true) }))
         
         // 2. Interrupt halfway through
         session.stop()

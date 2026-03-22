@@ -137,19 +137,15 @@ class SessionSerializationTest {
         clientHandler.onWakeWordDetected()
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("transcript", buildJsonObject { put("text", "hello") }))
-        
-        // Server sends synthesize and tells us to continue
-        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {
-            putJsonObject("intent_output") {
-                put("continue_conversation", true)
-            }
-        }))
+        clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
 
         // Clear mocks from session 1 verification
         clearMocks(messenger)
 
-        // Fulfill logic finished requirement early (exercise ordering bug)
-        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}))
+        // Server signals logic done and whether to continue (matches PipelineEnded in companion)
+        clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {
+            put("continue_conversation", true)
+        }))
 
         // Finish audio (this triggers continue via finalizeAndCleanup)
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
