@@ -179,17 +179,7 @@ class SatelliteClientHandlerTest {
         }
     }
 
-    @Test
-    fun `test handleTranscript with never mind resets pipeline`() {
-        clientHandler.onWakeWordDetected()
-        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        clientHandler.processPacket(WyomingPacket("transcript", buildJsonObject { put("text", "never mind") }))
-        
-        verify {
-            mediaHandler.updateVolumeDucking("all", false)
-            mediaHandler.pcmMediaPlayer.stop(true)
-        }
-    }
+
 
     @Test
     fun `test handleSynthesize extracts continue_conversation flag`() {

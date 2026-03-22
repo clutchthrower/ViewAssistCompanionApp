@@ -118,14 +118,9 @@ class VoiceSession(
             callback.onReleaseAudioStream()
         }
         
-        if (packet.getProp("text").lowercase().contains("never mind")) {
-            callback.onUpdateVolumeDucking("all", false)
-            stop(sendAudioStop = true)
-            callback.onSessionFinalized(this)
-        } else {
-            stage = PipelineStage.PROCESSING // Waiting for synthesis or pipeline-ended
-            callback.setPipelineTimeout(15)
-        }
+        stage = PipelineStage.PROCESSING // Waiting for synthesis or pipeline-ended
+        callback.setPipelineTimeout(15)
+
     }
 
     private fun handleSynthesize(packet: WyomingPacket) {

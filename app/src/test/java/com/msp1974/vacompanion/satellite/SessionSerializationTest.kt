@@ -131,27 +131,7 @@ class SessionSerializationTest {
         
         verify(exactly = 0) { messenger.sendEvent(any()) }
     }
-    @Test
-    fun `test never mind transcript interrupts session and finalizes`() {
-        clientHandler.onWakeWordDetected()
-        verify { 
-            messenger.sendEvent(match { it.type == "run-pipeline" }) 
-        }
-        
-        // Put in listening mode
-        clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
-        
-        val transcriptPacket = WyomingPacket("transcript", buildJsonObject {
-            put("text", "oh never mind")
-        })
-        clientHandler.processPacket(transcriptPacket)
-        
-        // Wait to make sure the pipeline timeout is NOT set to 15 (which is for normal transcript)
-        // Check that session is finalized right away
-        verify(atLeast = 1) {
-            mediaHandler.updateVolumeDucking("all", false)
-        }
-    }
+
     @Test
     fun `test continue conversation after tts`() {
         clientHandler.onWakeWordDetected()
