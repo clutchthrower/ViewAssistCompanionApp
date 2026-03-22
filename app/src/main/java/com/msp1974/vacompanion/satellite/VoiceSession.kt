@@ -35,7 +35,9 @@ class VoiceSession(
         private set
     
     @Volatile var logicFinished = false
+        private set
     @Volatile var audioFinished = false
+        private set
     @Volatile var finalized = false
     @Volatile var forceContinue = false
     @Volatile var isExpectingTtsAudio = false

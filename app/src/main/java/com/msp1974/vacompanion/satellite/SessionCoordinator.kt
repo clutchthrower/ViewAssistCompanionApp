@@ -42,13 +42,20 @@ class SessionCoordinator(
     }
 
     fun onWakeWordDetected() {
+        var startImmediately = false
         val sessionToStop = synchronized(this) {
             if (currentSession != null) {
+                val toStop = currentSession!!
+                
                 val nextId = sessionIdGenerator.incrementAndGet()
                 pendingSession = VoiceSession(nextId, log, callback)
                 isRestartPending = true
                 
-                val toStop = currentSession
+                // If the session was already logically finished, we don't need to wait for server cleanup
+                if (toStop.logicFinished) {
+                    startImmediately = true
+                }
+                
                 currentSession = null
                 toStop
             } else if (isRestartPending) {
@@ -63,6 +70,18 @@ class SessionCoordinator(
         if (sessionToStop != null) {
             log.d("Interrupting current session ${sessionToStop.id}. Waiting for server cleanup.")
             sessionToStop.stop()
+            
+            if (startImmediately) {
+                log.d("Session ${sessionToStop.id} already received pipeline-ended. Starting pending session immediately.")
+                synchronized(this) {
+                    if (isRestartPending && pendingSession != null) {
+                        isRestartPending = false
+                        currentSession = pendingSession
+                        pendingSession = null
+                        currentSession
+                    } else null
+                }?.initiate()
+            }
             return
         }
 
@@ -131,8 +150,10 @@ class SessionCoordinator(
 
     fun onSessionFinalized(session: VoiceSession) {
         val sessionToInitiate = synchronized(this) {
-            if (currentSession == session) {
-                currentSession = null
+            if (currentSession == session || isRestartPending) {
+                if (currentSession == session) {
+                    currentSession = null
+                }
                 
                 if (isRestartPending) {
                      isRestartPending = false
