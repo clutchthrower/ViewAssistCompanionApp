@@ -137,6 +137,10 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var playerVolume: Int by Delegates.observable(100) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var alarmVolume: Int by Delegates.observable(DEFAULT_ALARM_VOLUME) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -315,6 +319,7 @@ class APPConfig(val context: Context) {
         settings["raw_proximity_threshold"]?.asIntOrNull()?.let { rawProximitySensorThreshold = it }
         settings["notification_volume"]?.asIntOrNull()?.let { notificationVolume = it }
         settings["music_volume"]?.asIntOrNull()?.let { musicVolume = it }
+        settings["player_volume"]?.asIntOrNull()?.let { playerVolume = it }
         settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }

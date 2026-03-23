@@ -239,6 +239,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "musicVolume" -> {
                 setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
+            "playerVolume" -> {
+                server.sendSetting("player_volume", event.newValue as Int)
+            }
             "alarmVolume" -> {
                 setVolume(AudioManager.STREAM_ALARM, event.newValue as Int)
             }
@@ -391,6 +394,10 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     fun setInitialValues() {
         config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
+        server.sendSetting("player_volume", config.playerVolume)
+        server.sendSetting("music_volume", config.musicVolume)
+        server.sendSetting("notification_volume", config.notificationVolume)
+        server.sendSetting("alarm_volume", config.alarmVolume)
     }
 
     fun startSensors(context: Context) {
