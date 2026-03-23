@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import com.msp1974.vacompanion.audio.AudioStream
 
 class VolumeObserver(
     private val context: Context,
@@ -19,16 +20,26 @@ class VolumeObserver(
         super.onChange(selfChange, uri)
 
         // We check the "music" stream specifically, but you can check others
-        val musicVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val notificationVolume = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
-        val alarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-        onVolumeChanged(musicVolume, notificationVolume, alarmVolume)
+        val mediaVolume = audioManager.getStreamVolume(AudioStream.Media.STREAM)
+        val voiceVolume = audioManager.getStreamVolume(AudioStream.Voice.STREAM)
+        val alarmVolume = audioManager.getStreamVolume(AudioStream.Alarm.STREAM)
+        onVolumeChanged(mediaVolume, voiceVolume, alarmVolume)
     }
 
     fun register() {
         context.contentResolver.registerContentObserver(
-            Settings.System.CONTENT_URI,
-            true,
+            Settings.System.getUriFor(AudioStream.Media.SETTING),
+            false,
+            this
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.System.getUriFor(AudioStream.Voice.SETTING),
+            false,
+            this
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.System.getUriFor(AudioStream.Alarm.SETTING),
+            false,
             this
         )
     }

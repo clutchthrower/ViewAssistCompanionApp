@@ -2,13 +2,18 @@ package com.msp1974.vacompanion.audio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
 
-class VoicePlayer(context: Context) {
+class VoicePlayer(private val context: Context) {
     private val log = Logger()
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null
+    
     private var sampleRate = 22050
     private var channelCount = 1
     private var bytesPerSample = 2
@@ -24,7 +29,7 @@ class VoicePlayer(context: Context) {
         val bytesPerSample = if (bytesPerSample == 2) AudioFormat.ENCODING_PCM_16BIT else AudioFormat.ENCODING_PCM_8BIT
 
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setUsage(AudioStream.Voice.USAGE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
@@ -48,11 +53,31 @@ class VoicePlayer(context: Context) {
             .build()
     }
 
-    fun updatePlayerVolume() {
-        audioTrack?.let { track ->
-            val gain = config.playerVolume / 100.0f
-            track.setVolume(gain)
-            log.d("Updated PCMMediaPlayer gain to ${config.playerVolume}%")
+    private fun requestAudioFocus(): Boolean {
+        val focusAttributes = AudioAttributes.Builder()
+            .setUsage(AudioStream.Voice.USAGE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+        audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(focusAttributes)
+            .setAcceptsDelayedFocusGain(false)
+            .setOnAudioFocusChangeListener { focusChange ->
+                when (focusChange) {
+                    AudioManager.AUDIOFOCUS_LOSS,
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> stop(force = true)
+                }
+            }
+            .build()
+
+        val res = audioManager.requestAudioFocus(audioFocusRequest!!)
+        return res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    private fun abandonAudioFocus() {
+        audioFocusRequest?.let { 
+            audioManager.abandonAudioFocusRequest(it)
+            audioFocusRequest = null
         }
     }
 
@@ -61,11 +86,15 @@ class VoicePlayer(context: Context) {
             stop(force = true)
         }
 
-        isPlaying = true
-        audioTrack = createAudioTrack().apply { 
-            val gain = config.playerVolume / 100.0f
-            setVolume(gain)
-            play() 
+        if (requestAudioFocus()) {
+            isPlaying = true
+            audioTrack = createAudioTrack().apply { 
+                // Voice/TTS gain is fixed at 100% (fixed)
+                setVolume(1.0f)
+                play() 
+            }
+        } else {
+            log.w("Failed to gain audio focus for voice playback")
         }
     }
 
@@ -75,6 +104,7 @@ class VoicePlayer(context: Context) {
 
     fun stop(force: Boolean = false) {
         isPlaying = false
+        abandonAudioFocus()
         audioTrack?.let { track ->
             try {
                 if (force) {

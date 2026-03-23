@@ -22,7 +22,6 @@ class MediaPlayer(val context: Context) {
     private var playRequested: Boolean = false
     
     private val mainHandler = Handler(context.mainLooper)
-    private var originalMusicVolume: Int? = null
     @Volatile private var isActuallyPlaying: Boolean = false
 
     val isPlaying: Boolean
@@ -36,6 +35,16 @@ class MediaPlayer(val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: MediaPlayer(context).also { instance = it }
             }
+    }
+
+    private fun getTargetVolume(): Float {
+        val baseGain = config.mediaPlayerGain / 100.0f
+        return if (isVolumeDucked) {
+            val reduction = config.duckingVolume / 100.0f
+            baseGain * (1.0f - reduction)
+        } else {
+            baseGain
+        }
     }
 
     fun play(url: String) {
@@ -54,12 +63,18 @@ class MediaPlayer(val context: Context) {
             try {
                 val player = ExoPlayer.Builder(context).build()
                 mediaPlayer = player
+
+                val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(AudioStream.Media.USAGE)
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build()
+                player.setAudioAttributes(audioAttributes, true)
                 
                 val mediaItem = MediaItem.fromUri(url.toUri())
                 player.setMediaItem(mediaItem)
                 
-                // Use the software gain set by the media_player entity
-                player.volume = config.playerVolume / 100.0f
+                // Use the software gain set by the media_player entity, accounting for ducking
+                player.volume = getTargetVolume()
                 
                 player.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -69,9 +84,9 @@ class MediaPlayer(val context: Context) {
                 
                 player.prepare()
                 player.play()
-                Timber.i("Music started (Player gain: ${config.playerVolume}%)")
+                Timber.i("Media started (Player gain: ${config.mediaPlayerGain}%, Ducked: $isVolumeDucked)")
             } catch (ex: Exception) {
-                Timber.e("Error playing music: $ex")
+                Timber.e("Error playing media: $ex")
                 playRequested = false
             }
         }
@@ -80,8 +95,8 @@ class MediaPlayer(val context: Context) {
     fun updatePlayerVolume() {
         mainHandler.post {
             mediaPlayer?.let { player ->
-                player.volume = config.playerVolume / 100.0f
-                Timber.d("Updated player gain to ${config.playerVolume}%")
+                player.volume = getTargetVolume()
+                Timber.d("Updated player gain to ${player.volume} (Base: ${config.mediaPlayerGain}%)")
             }
         }
     }
@@ -89,7 +104,7 @@ class MediaPlayer(val context: Context) {
     fun pause() {
         mainHandler.post {
             mediaPlayer?.pause()
-            Timber.i("Music paused")
+            Timber.i("Media paused")
         }
     }
 
@@ -100,8 +115,8 @@ class MediaPlayer(val context: Context) {
                     player.prepare()
                 }
                 player.play()
-                Timber.i("Music resumed")
-            } ?: Timber.w("Music resume failed: No media player instance")
+                Timber.i("Media resumed")
+            } ?: Timber.w("Media resume failed: No media player instance")
         }
     }
 
@@ -109,9 +124,9 @@ class MediaPlayer(val context: Context) {
         mainHandler.post {
             try {
                 mediaPlayer?.stop()
-                Timber.i("Music stopped")
+                Timber.i("Media stopped")
             } catch (e: Exception) {
-                Timber.e("Error stopping music: $e")
+                Timber.e("Error stopping media: $e")
             }
         }
     }
@@ -123,29 +138,32 @@ class MediaPlayer(val context: Context) {
                 mediaPlayer?.stop()
                 mediaPlayer?.release()
                 mediaPlayer = null
-                Timber.i("Music player released")
+                Timber.i("Media player released")
             } catch (e: Exception) {
-                Timber.e("Error releasing music player: $e")
+                Timber.e("Error releasing media player: $e")
             }
         }
     }
 
 
+    private var volumeAnimationThread: Thread? = null
+
     fun duckVolume() {
         mainHandler.post {
-            // Use system volume level for ducking as per the layered model
             synchronized(this) {
                 if (isVolumeDucked) return@synchronized
                 isVolumeDucked = true
                 
-                // Save current system volume
-                originalMusicVolume = config.musicVolume
-                
-                val reduction = config.duckingVolume / 100.0
-                val targetVol = (originalMusicVolume!! * (1.0 - reduction)).toInt()
-                
-                Timber.d("Ducking system volume from $originalMusicVolume to $targetVol (${config.duckingVolume}% reduction)")
-                config.musicVolume = targetVol
+                mediaPlayer?.let { player ->
+                    val startVol = player.volume
+                    val targetVol = getTargetVolume()
+                    Timber.d("Ducking media player gain from $startVol to $targetVol (Animating)")
+                    
+                    volumeAnimationThread?.interrupt()
+                    volumeAnimationThread = VolumeAnimator.animate(startVol, targetVol) { vol ->
+                        mediaPlayer?.volume = vol
+                    }
+                }
             }
         }
     }
@@ -156,11 +174,16 @@ class MediaPlayer(val context: Context) {
                 if (!isVolumeDucked) return@post
                 isVolumeDucked = false
                 
-                originalMusicVolume?.let { restoredVol ->
-                    Timber.i("Restoring system volume to $restoredVol")
-                    config.musicVolume = restoredVol
+                mediaPlayer?.let { player ->
+                    val startVol = player.volume
+                    val targetVol = getTargetVolume()
+                    Timber.i("Restoring media player gain from $startVol to $targetVol (Animating)")
+                    
+                    volumeAnimationThread?.interrupt()
+                    volumeAnimationThread = VolumeAnimator.animate(startVol, targetVol) { vol ->
+                        mediaPlayer?.volume = vol
+                    }
                 }
-                originalMusicVolume = null
             }
         }
     }

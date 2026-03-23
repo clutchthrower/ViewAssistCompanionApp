@@ -130,15 +130,15 @@ class APPConfig(val context: Context) {
     }
 
 
-    var notificationVolume: Int by Delegates.observable(DEFAULT_NOTIFICATION_VOLUME) { property, oldValue, newValue ->
+    var voiceVolume: Int by Delegates.observable(DEFAULT_VOICE_VOLUME) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var musicVolume: Int by Delegates.observable(DEFAULT_MUSIC_VOLUME) { property, oldValue, newValue ->
+    var mediaVolume: Int by Delegates.observable(DEFAULT_MEDIA_VOLUME) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var playerVolume: Int by Delegates.observable(100) { property, oldValue, newValue ->
+    var mediaPlayerGain: Int by Delegates.observable(100) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -150,7 +150,7 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var isMuted: Boolean by Delegates.observable(DEFAULT_MUTE) { property, oldValue, newValue ->
+    var micEnabled: Boolean by Delegates.observable(DEFAULT_MIC_ENABLED) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -315,13 +315,13 @@ class APPConfig(val context: Context) {
         settings["mic_off_sound"]?.jsonPrimitive?.contentOrNull?.let { micOffSound = it }
         settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
         settings["raw_proximity_threshold"]?.asIntOrNull()?.let { rawProximitySensorThreshold = it }
-        settings["notification_volume"]?.asIntOrNull()?.let { notificationVolume = it }
-        settings["music_volume"]?.asIntOrNull()?.let { musicVolume = it }
-        settings["player_volume"]?.asIntOrNull()?.let { playerVolume = it }
+        settings["voice_volume"]?.asIntOrNull()?.let { voiceVolume = it }
+        settings["media_volume"]?.asIntOrNull()?.let { mediaVolume = it }
+        settings["media_player_gain"]?.asIntOrNull()?.let { mediaPlayerGain = it }
         settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
-        settings["mute"]?.jsonPrimitive?.booleanOrNull?.let { isMuted = it }
+        settings["mic"]?.jsonPrimitive?.booleanOrNull?.let { micEnabled = it }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
         settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
         settings["swipe_refresh"]?.jsonPrimitive?.booleanOrNull?.let { swipeRefresh = it }
@@ -375,8 +375,18 @@ class APPConfig(val context: Context) {
 
     fun onValueChangedListener(property: KProperty<*>, oldValue: Any, newValue: Any) {
         if (oldValue != newValue) {
-            val event = Event(property.name, oldValue, newValue)
-            Firebase.crashlytics.log("${property.name} changed from $oldValue to $newValue")
+            val eventName = when (property.name) {
+                "voiceVolume" -> "voice_volume"
+                "mediaVolume" -> "media_volume"
+                "mediaPlayerGain" -> "media_player_gain"
+                "alarmVolume" -> "alarm_volume"
+                "duckingVolume" -> "ducking_volume"
+                "micGain" -> "mic_gain"
+                "doNotDisturb" -> "do_not_disturb"
+                else -> property.name
+            }
+            val event = Event(eventName, oldValue, newValue)
+            Firebase.crashlytics.log("${property.name} ($eventName) changed from $oldValue to $newValue")
             eventBroadcaster.notifyEvent(event)
         }
     }
@@ -388,20 +398,20 @@ class APPConfig(val context: Context) {
         const val DEFAULT_RAW_PROXIMITY_THRESHOLD = 300
         const val DEFAULT_WAKE_WORD = "hey_jarvis"
         const val DEFAULT_WAKE_WORD_SOUND = "none"
-        const val DEFAULT_PROCESSING_SOUND = "processing"
-        const val DEFAULT_ERROR_SOUND = "error"
-        const val DEFAULT_STOP_WORD_SOUND = "stop_word"
-        const val DEFAULT_MIC_ON_SOUND = "mute_switch_on"
-        const val DEFAULT_MIC_OFF_SOUND = "mute_switch_off"
+        const val DEFAULT_PROCESSING_SOUND = "havpe_processing"
+        const val DEFAULT_ERROR_SOUND = "generic_error"
+        const val DEFAULT_STOP_WORD_SOUND = "generic_stop_word"
+        const val DEFAULT_MIC_ON_SOUND = "havpe_mic_on"
+        const val DEFAULT_MIC_OFF_SOUND = "havpe_mic_off"
         const val DEFAULT_WAKE_WORD_THRESHOLD = 0.6f
-        const val DEFAULT_NOTIFICATION_VOLUME = 10
-        const val DEFAULT_MUSIC_VOLUME = 10
+        const val DEFAULT_VOICE_VOLUME = 10
+        const val DEFAULT_MEDIA_VOLUME = 10
         const val DEFAULT_ALARM_VOLUME = 10
         const val DEFAULT_SCREEN_BRIGHTNESS = 0.5f
         const val DEFAULT_SCREEN_AUTO_BRIGHTNESS = true
         const val DEFAULT_SWIPE_REFRESH = true
         const val DEFAULT_DUCKING_VOLUME = 70
-        const val DEFAULT_MUTE = false
+        const val DEFAULT_MIC_ENABLED = true
         const val DEFAULT_MIC_GAIN = 0
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
 

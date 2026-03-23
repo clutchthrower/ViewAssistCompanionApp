@@ -28,7 +28,7 @@ class SatelliteActionHandler(
             when (action) {
                 "play-media" -> executePlayMedia(payload)
                 "play" -> {
-                    payload["volume"].asIntOrNull()?.let { config.playerVolume = it }
+                    payload["volume"].asIntOrNull()?.let { config.mediaPlayerGain = it }
                     mediaHandler.mediaPlayer.resume()
                 }
                 "pause" -> mediaHandler.mediaPlayer.pause()
@@ -48,16 +48,15 @@ class SatelliteActionHandler(
         val url = payload["url"]?.jsonPrimitive?.content ?: ""
         if (url.isNotEmpty()) {
             val volume = payload["volume"].asIntOrNull() ?: 100
-            config.playerVolume = volume
+            config.mediaPlayerGain = volume
             mediaHandler.mediaPlayer.play(url)
         }
     }
 
     private fun executeSetVolume(payload: JsonObject) {
         val volume = payload["volume"].asIntOrNull() ?: 100
-        config.playerVolume = volume
+        config.mediaPlayerGain = volume
         mediaHandler.mediaPlayer.updatePlayerVolume()
-        mediaHandler.voicePlayer.updatePlayerVolume()
     }
 
     private fun executeToast(payload: JsonObject) {

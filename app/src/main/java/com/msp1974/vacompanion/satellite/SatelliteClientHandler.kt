@@ -287,9 +287,9 @@ class SatelliteClientHandler(
                 "capabilities" -> sendCapabilities()
                 "run-satellite" -> startSatelliteService()
                 "pause-satellite" -> if (satelliteState == SatelliteState.RUNNING) stopSatelliteService()
-                "settings", "custom-settings" -> processSettingsPacket(packet)
-                "action", "custom-action" -> handleActionPacket(packet)
-                "custom-event" -> handleCustomEventPacket(packet)
+                "settings" -> processSettingsPacket(packet)
+                "action" -> handleActionPacket(packet)
+                "custom-vaca" -> handleCustomVacaEventPacket(packet)
                 "timer-finished" -> if (satelliteState == SatelliteState.RUNNING) handleAlarmAction(enable = true)
                 else -> {
                     // All other packets are potentially interaction-related
@@ -309,7 +309,7 @@ class SatelliteClientHandler(
         }
     }
 
-    private fun handleCustomEventPacket(packet: WyomingPacket) {
+    private fun handleCustomVacaEventPacket(packet: WyomingPacket) {
         val eventType = packet.getProp("event_type")
         val eventData = packet.getJsonObject("data") ?: packet.data
 
@@ -348,7 +348,6 @@ class SatelliteClientHandler(
 
     override fun updateVolume() {
         mediaHandler.mediaPlayer.updatePlayerVolume()
-        mediaHandler.voicePlayer.updatePlayerVolume()
     }
 
     private fun processSettingsPacket(packet: WyomingPacket) {
@@ -449,18 +448,17 @@ class SatelliteClientHandler(
         sendRawEvent(WyomingPacket("audio-chunk", data, audio, sessionId = session.id))
     }
 
-    override fun sendStatus(data: JsonObject) = sendCustomEvent("status", data)
+    override fun sendStatus(data: JsonObject) = sendCustomVacaEvent("status", data)
 
     override fun sendSetting(name: String, value: Any) = sendSettingChange(name, value)
 
     fun sendCapabilities() {
         val data = DeviceCapabilitiesManager.toJson(server.getDeviceInfo())
-        sendCustomEvent("capabilities", data)
+        sendCustomVacaEvent("capabilities", data)
     }
 
     fun sendSettingChange(name: String, value: Any) {
-        sendCustomEvent("settings", buildJsonObject {
-            put("timestamp", WyomingPacket.isoNow())
+        val settings = buildJsonObject {
             putJsonObject("settings") {
                 when (value) {
                     is String -> put(name, value)
@@ -469,7 +467,16 @@ class SatelliteClientHandler(
                     is JsonElement -> put(name, value)
                 }
             }
-        })
+        }
+        sendCustomVacaEvent("settings", settings)
+    }
+
+    fun sendCustomVacaEvent(type: String, data: JsonObject) {
+        sendRawEvent(WyomingPacket("custom-vaca", buildJsonObject {
+            put("event_type", type)
+            put("data", data)
+            put("timestamp", WyomingPacket.isoNow())
+        }))
     }
 
     fun sendCustomEvent(type: String, data: JsonObject) {

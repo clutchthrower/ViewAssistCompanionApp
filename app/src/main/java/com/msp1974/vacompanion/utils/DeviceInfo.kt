@@ -24,6 +24,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import com.msp1974.vacompanion.audio.AudioStream
 import timber.log.Timber
 
 
@@ -173,12 +174,9 @@ class DeviceCapabilitiesManager(val context: Context) {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         return buildJsonObject {
-            put("maxMusicVolume", audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
-            put(
-                "maxNotificationVolume",
-                audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
-            )
-            put("maxAlarmVolume", audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM))
+            put("maxMediaVolume", audioManager.getStreamMaxVolume(AudioStream.Media.STREAM))
+            put("maxVoiceVolume", audioManager.getStreamMaxVolume(AudioStream.Voice.STREAM))
+            put("maxAlarmVolume", audioManager.getStreamMaxVolume(AudioStream.Alarm.STREAM))
         }
     }
 
@@ -200,8 +198,8 @@ class DeviceCapabilitiesManager(val context: Context) {
                     put("has_dnd", data.hasDND)
                     put("proximity_sensor_type", data.proximitySensorType)
                     putJsonObject("audio") {
-                        put("max_music_volume", data.audioInfo.getValue("maxMusicVolume"))
-                        put("max_notification_volume", data.audioInfo.getValue("maxNotificationVolume"))
+                        put("max_media_volume", data.audioInfo.getValue("maxMediaVolume"))
+                        put("max_voice_volume", data.audioInfo.getValue("maxVoiceVolume"))
                         put("max_alarm_volume", data.audioInfo.getValue("maxAlarmVolume"))
                     }
                     putJsonArray("sensors") {

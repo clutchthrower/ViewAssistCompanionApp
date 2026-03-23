@@ -1,9 +1,7 @@
 package com.msp1974.vacompanion.service
 
 import android.Manifest
-import android.app.NotificationManager
 import android.content.Context
-import android.content.Context.NOTIFICATION_SERVICE
 import android.content.res.AssetManager
 import android.media.AudioManager
 import android.net.wifi.WifiManager
@@ -13,6 +11,7 @@ import com.msp1974.vacompanion.satellite.SatelliteCallback
 import com.msp1974.vacompanion.satellite.SatelliteServer
 import com.msp1974.vacompanion.satellite.SatelliteZeroconf
 import com.msp1974.vacompanion.wyoming.WyomingPacket
+import com.msp1974.vacompanion.audio.VolumeSyncManager
 import com.msp1974.vacompanion.audio.EffectsPlayer
 import com.msp1974.vacompanion.audio.StreamVolumeManager as AudManager
 import com.msp1974.vacompanion.audio.MicrophoneInput
@@ -90,7 +89,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private var sensorRunner: Sensors? = null
     lateinit var assetManager: AssetManager
     lateinit var server: SatelliteServer
-    private lateinit var volumeObserver: VolumeObserver
+    private lateinit var volumeSyncManager: VolumeSyncManager
     private val effectsPlayer = EffectsPlayer(context)
 
     private var motionTask = CameraBackgroundTask(context)
@@ -102,30 +101,12 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL, "wallPanel:wifiLock")
 
-        volumeObserver = VolumeObserver(context) { musicVolume, notificationVolume, alarmVolume ->
-            if (config.musicVolume != musicVolume) {
-                config.musicVolume = musicVolume
-                server.sendSetting("music_volume", musicVolume)
-            }
-
-            if (config.notificationVolume != notificationVolume) {
-                config.notificationVolume = notificationVolume
-                server.sendSetting("notification_volume", notificationVolume)
-            }
-
-            if (config.alarmVolume != alarmVolume) {
-                config.alarmVolume = alarmVolume
-                server.sendSetting("alarm_volume", alarmVolume)
-            }
-        }
-
         // Start satellite server
         server = SatelliteServer(context, config.serverPort, object : SatelliteCallback {
             @RequiresPermission(Manifest.permission.RECORD_AUDIO)
             override fun onSatelliteStarted() {
                 Timber.i("Background Task - Connection detected")
-                setInitialValues()
-                volumeObserver.register()
+                volumeSyncManager.onConnected()
                 startSensors(context)
                 runWakeWordDetection()
                 warmUpAudioResources()
@@ -142,7 +123,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
                 terminateWakeWordDetection()
                 stopSensors()
-                volumeObserver.unregister()
+                volumeSyncManager.onDisconnected()
                 zeroConf.registerService(config.serverPort)
             }
 
@@ -190,6 +171,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 engine?.setStreaming(false)
             }
         })
+        volumeSyncManager = VolumeSyncManager(context, server)
         thread(name="WyomingServer") { server.start() }
 
         // Add config change listeners
@@ -204,11 +186,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     override fun onEventTriggered(event: Event) {
         var consumed = true
         when (event.eventName) {
-            "isMuted" -> {
+            "micEnabled" -> {
                 try {
-                    val isMuted = event.newValue as Boolean
-                    engine?.setMuted(isMuted)
-                    if (isMuted) {
+                    val micEnabled = event.newValue as Boolean
+                    engine?.setMuted(!micEnabled)
+                    if (micEnabled) {
                         if (config.micOnSound != "none") {
                             try {
                                 val resId = context.resources.getIdentifier(config.micOnSound, "raw", context.packageName)
@@ -236,20 +218,8 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     Timber.e("Error setting muted: ${e.message.toString()}")
                 }
             }
-            "notificationVolume" -> {
-                if (!DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)) {
-                    setVolume(AudioManager.STREAM_NOTIFICATION, event.newValue as Int)
-                }
-            }
-            "musicVolume" -> {
-                setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
-            }
-            "playerVolume" -> {
-                server.sendSetting("player_volume", event.newValue as Int)
-                server.pipelineClient?.updateVolume()
-            }
-            "alarmVolume" -> {
-                setVolume(AudioManager.STREAM_ALARM, event.newValue as Int)
+            "voice_volume", "media_volume", "media_player_gain", "alarm_volume", "do_not_disturb" -> {
+                volumeSyncManager.onSettingChange(event.eventName, event.newValue)
             }
             "continueConversationStart" -> {
                 if (config.wakeWordSound != "none") {
@@ -318,10 +288,6 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
                 audioRoute = AudioRouteOption.DETECT
                 sendDiagnostics(0f, 0f)
-            }
-            "doNotDisturb" -> {
-                setDoNotDisturb(event.newValue as Boolean)
-                server.sendSetting("do_not_disturb", event.newValue)
             }
             "screenSaver" -> {
                 server.sendSetting("screen_saver", event.newValue)
@@ -398,13 +364,6 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         }
     }
 
-    fun setInitialValues() {
-        config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
-        server.sendSetting("player_volume", config.playerVolume)
-        server.sendSetting("music_volume", config.musicVolume)
-        server.sendSetting("notification_volume", config.notificationVolume)
-        server.sendSetting("alarm_volume", config.alarmVolume)
-    }
 
     fun startSensors(context: Context) {
         sensorRunner = Sensors(context, object : SensorUpdatesCallback {
@@ -587,39 +546,6 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         }
     }
 
-    fun setVolume(stream: Int, volume: Int) {
-        try {
-            val audioManager = AudManager(context)
-            audioManager.setVolume(stream, volume)
-        } catch (e: Exception) {
-            Timber.d("Error setting volume: ${e.message.toString()}")
-            firebase.logException(e)
-        }
-    }
-
-    fun setDoNotDisturb(enable: Boolean) {
-        val notificationManager =  context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        val isInDND = notificationManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
-        if (isInDND != enable) {
-            if (notificationManager.isNotificationPolicyAccessGranted) {
-                Timber.d("Setting do not disturb to $enable")
-                if (enable) {
-                    notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
-                } else {
-                    notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-                }
-            } else {
-                Timber.w("Unable to set do not disturb, notification policy access not granted")
-                config.eventBroadcaster.notifyEvent(
-                    Event(
-                        "showToastMessage",
-                        "",
-                        "Unable to set do not disturb.  Permission not granted."
-                    )
-                )
-            }
-        }
-    }
 
     fun sendDiagnostics(audioLevel: Float, detectionLevel: Float) {
         if (config.diagnosticsEnabled) {
