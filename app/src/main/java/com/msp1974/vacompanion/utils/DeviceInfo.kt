@@ -29,6 +29,8 @@ import timber.log.Timber
 
 data class DeviceCapabilitiesData(
     val deviceSignature: String,
+    val manufacturer: String,
+    val model: String,
     val appVersion: String,
     val sdkVersion: Int,
     val webViewVersion: String,
@@ -51,6 +53,8 @@ class DeviceCapabilitiesManager(val context: Context) {
     fun getDeviceInfo(): DeviceCapabilitiesData {
         return DeviceCapabilitiesData(
             deviceSignature = Helpers.getDeviceName().toString(),
+            manufacturer = Build.MANUFACTURER,
+            model = Build.MODEL,
             appVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName.toString(),
             sdkVersion = Build.VERSION.SDK_INT,
             webViewVersion = getWebViewVersion(),
@@ -185,6 +189,8 @@ class DeviceCapabilitiesManager(val context: Context) {
             return buildJsonObject {
                 putJsonObject("capabilities") {
                     put("device_signature", data.deviceSignature)
+                    put("manufacturer", data.manufacturer)
+                    put("model", data.model)
                     put("app_version", data.appVersion)
                     put("sdk_version", data.sdkVersion)
                     put("webview_version", data.webViewVersion)
