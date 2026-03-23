@@ -7,7 +7,7 @@ import android.media.AudioTrack
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
 
-class PCMMediaPlayer(context: Context) {
+class VoicePlayer(context: Context) {
     private val log = Logger()
     private var sampleRate = 22050
     private var channelCount = 1

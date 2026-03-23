@@ -14,7 +14,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.min
 import timber.log.Timber
 
-internal class AudioManager(context: Context) {
+internal class StreamVolumeManager(context: Context) {
     private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
 
     fun getStreamMaxVolume(stream: Int): Int {
@@ -34,7 +34,7 @@ internal class AudioManager(context: Context) {
  * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
  * to eliminate buffering latency on first playback and ensure immediate audio feedback.
  */
-class SoundClipPlayer(private val context: Context) {
+class EffectsPlayer(private val context: Context) {
     private val players = mutableMapOf<Int, ExoPlayer>()
 
     fun prepare(resId: Int) {

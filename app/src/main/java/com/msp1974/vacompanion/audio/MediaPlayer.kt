@@ -12,7 +12,7 @@ import androidx.annotation.GuardedBy
 import androidx.media3.common.Player
 
 
-class VAMediaPlayer(val context: Context) {
+class MediaPlayer(val context: Context) {
     private val config: APPConfig = APPConfig.getInstance(context)
     private var mediaPlayer: ExoPlayer? = null
 
@@ -30,11 +30,11 @@ class VAMediaPlayer(val context: Context) {
 
     companion object {
         @Volatile
-        private var instance: VAMediaPlayer? = null
+        private var instance: MediaPlayer? = null
 
         fun getInstance(context: Context) =
             instance ?: synchronized(this) {
-                instance ?: VAMediaPlayer(context).also { instance = it }
+                instance ?: MediaPlayer(context).also { instance = it }
             }
     }
 
@@ -63,7 +63,7 @@ class VAMediaPlayer(val context: Context) {
                 
                 player.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        this@VAMediaPlayer.isActuallyPlaying = isPlaying
+                        this@MediaPlayer.isActuallyPlaying = isPlaying
                     }
                 })
                 
@@ -95,21 +95,37 @@ class VAMediaPlayer(val context: Context) {
 
     fun resume() {
         mainHandler.post {
-            mediaPlayer?.play()
-            Timber.i("Music resumed")
+            mediaPlayer?.let { player ->
+                if (player.playbackState == Player.STATE_IDLE) {
+                    player.prepare()
+                }
+                player.play()
+                Timber.i("Music resumed")
+            } ?: Timber.w("Music resume failed: No media player instance")
         }
     }
 
     fun stop() {
         mainHandler.post {
             try {
+                mediaPlayer?.stop()
+                Timber.i("Music stopped")
+            } catch (e: Exception) {
+                Timber.e("Error stopping music: $e")
+            }
+        }
+    }
+
+    fun release() {
+        mainHandler.post {
+            try {
                 playRequested = false
                 mediaPlayer?.stop()
                 mediaPlayer?.release()
                 mediaPlayer = null
-                Timber.i("Music stopped")
+                Timber.i("Music player released")
             } catch (e: Exception) {
-                Timber.e("Error stopping music: $e")
+                Timber.e("Error releasing music player: $e")
             }
         }
     }

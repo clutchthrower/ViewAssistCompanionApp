@@ -90,15 +90,15 @@ class SatelliteClientHandler(
                 server.releaseInputAudioStream()
             }
 
-            override fun onStartMediaPlayback() = mediaHandler.pcmMediaPlayer.play()
-
+            override fun onStartMediaPlayback() = mediaHandler.voicePlayer.play()
+            
             override fun onWriteMediaChunk(payload: ByteArray) {
-                if (mediaHandler.pcmMediaPlayer.isPlaying) {
-                    mediaHandler.pcmMediaPlayer.writeAudio(payload)
+                if (mediaHandler.voicePlayer.isPlaying) {
+                    mediaHandler.voicePlayer.writeAudio(payload)
                 }
             }
 
-            override fun onStopMediaPlayback() = mediaHandler.pcmMediaPlayer.stop(force = true)
+            override fun onStopMediaPlayback() = mediaHandler.voicePlayer.stop(force = true)
 
             override fun onUpdateVolumeDucking(key: String, duck: Boolean) = mediaHandler.updateVolumeDucking(key, duck)
 
@@ -137,7 +137,7 @@ class SatelliteClientHandler(
         get() = sessionCoordinator.activeSession?.stage ?: WyomingPipelineStage.IDLE
     
     override fun isActive(): Boolean = 
-        sessionCoordinator.isActive() || mediaHandler.musicPlayer.isPlaying || mediaHandler.alarmPlayer.isSounding || mediaHandler.pcmMediaPlayer.isPlaying
+        sessionCoordinator.isActive() || mediaHandler.mediaPlayer.isPlaying || mediaHandler.alarmPlayer.isSounding || mediaHandler.voicePlayer.isPlaying
 
     private var pingTimer: Timer? = null
     private val pipelineTimeoutRunnable = Runnable { 
@@ -218,7 +218,9 @@ class SatelliteClientHandler(
             config.homeAssistantConnectedIP = connectionId
 
             handleAlarmAction(enable = false)
-            mediaHandler.musicPlayer.stop()
+            mediaHandler.mediaPlayer.unDuckVolume()
+            mediaHandler.alarmPlayer.unDuckVolume()
+            mediaHandler.mediaPlayer.pause()
             sessionCoordinator.reset()
 
             server.pipelineClient = this
@@ -245,7 +247,7 @@ class SatelliteClientHandler(
             if (server.pipelineClient == this) {
                 if (pipelineStage == WyomingPipelineStage.LISTENING) server.releaseInputAudioStream()
                 handleAlarmAction(enable = false)
-                mediaHandler.musicPlayer.stop()
+                mediaHandler.mediaPlayer.stop()
                 server.pipelineClient = null
                 server.onSatelliteStopped()
                 config.homeAssistantConnectedIP = ""
@@ -329,8 +331,8 @@ class SatelliteClientHandler(
     }
 
     private fun handleBroadcastIntent(intent: Intent) {
-        if (mediaHandler.pcmMediaPlayer.isPlaying) {
-            mediaHandler.pcmMediaPlayer.stop()
+        if (mediaHandler.voicePlayer.isPlaying) {
+            mediaHandler.voicePlayer.stop()
             mediaHandler.updateVolumeDucking("music", false)
         }
         handleAlarmAction(false)
@@ -345,8 +347,8 @@ class SatelliteClientHandler(
     }
 
     override fun updateVolume() {
-        mediaHandler.musicPlayer.updatePlayerVolume()
-        mediaHandler.pcmMediaPlayer.updatePlayerVolume()
+        mediaHandler.mediaPlayer.updatePlayerVolume()
+        mediaHandler.voicePlayer.updatePlayerVolume()
     }
 
     private fun processSettingsPacket(packet: WyomingPacket) {

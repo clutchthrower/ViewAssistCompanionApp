@@ -2,7 +2,7 @@ package com.msp1974.vacompanion.audio
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.MediaPlayer
+import android.media.MediaPlayer as AndroidMediaPlayer
 import android.net.Uri
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.settings.APPConfig
@@ -12,18 +12,18 @@ import kotlin.concurrent.thread
 import androidx.core.net.toUri
 
 
-class Alarm(val context: Context) {
+class AlarmPlayer(val context: Context) {
     private val log = Logger()
     private val config: APPConfig = APPConfig.getInstance(context)
 
     var isVolumeDucked: Boolean = false
     var isSounding: Boolean = false
-    var mediaPlayer: MediaPlayer? = null
+    var mediaPlayer: AndroidMediaPlayer? = null
     private var unduckThread: Thread? = null
 
     fun startAlarm(url: String = "") {
         if (mediaPlayer == null) {
-            mediaPlayer = MediaPlayer().apply {
+            mediaPlayer = AndroidMediaPlayer().apply {
                 if (url != "") {
                     setDataSource(url)
                 } else {

@@ -1,26 +1,28 @@
 package com.msp1974.vacompanion.satellite
 
 import android.content.Context
-import com.msp1974.vacompanion.audio.VAMediaPlayer
-import com.msp1974.vacompanion.audio.Alarm
-import com.msp1974.vacompanion.audio.PCMMediaPlayer
-import com.msp1974.vacompanion.audio.SoundClipPlayer
+import com.msp1974.vacompanion.audio.MediaPlayer
+import com.msp1974.vacompanion.audio.AlarmPlayer
+import com.msp1974.vacompanion.audio.VoicePlayer
+import com.msp1974.vacompanion.audio.EffectsPlayer
 
 /**
  * Handles audio output and system-level media state for the satellite.
  * Manages PCM playback for TTS, music, alarms, and volume ducking.
  */
 class SatelliteMediaHandler(context: Context) {
-    val musicPlayer = VAMediaPlayer.getInstance(context)
-    val alarmPlayer = Alarm(context)
-    val pcmMediaPlayer = PCMMediaPlayer(context)
-    val soundClipPlayer = SoundClipPlayer(context)
+    val mediaPlayer = MediaPlayer.getInstance(context)
+    val alarmPlayer = AlarmPlayer(context)
+    val voicePlayer = VoicePlayer(context)
+    val effectsPlayer = EffectsPlayer(context)
 
     fun release() {
-        musicPlayer.stop()
+        mediaPlayer.pause()
+        mediaPlayer.unDuckVolume()
         alarmPlayer.stopAlarm()
-        pcmMediaPlayer.stop(force = true)
-        soundClipPlayer.release()
+        alarmPlayer.unDuckVolume()
+        voicePlayer.stop(force = false)
+        effectsPlayer.release()
     }
 
     /**
@@ -30,16 +32,16 @@ class SatelliteMediaHandler(context: Context) {
     fun updateVolumeDucking(key: String, duck: Boolean) {
         when (key) {
             "music" -> {
-                if (duck) musicPlayer.duckVolume() 
-                else if (!alarmPlayer.isSounding) musicPlayer.unDuckVolume()
+                if (duck) mediaPlayer.duckVolume() 
+                else if (!alarmPlayer.isSounding) mediaPlayer.unDuckVolume()
             }
             "alarm" -> if (duck) alarmPlayer.duckVolume() else alarmPlayer.unDuckVolume()
             "all" -> {
                 if (duck) {
-                    musicPlayer.duckVolume()
+                    mediaPlayer.duckVolume()
                     alarmPlayer.duckVolume()
                 } else {
-                    if (!alarmPlayer.isSounding) musicPlayer.unDuckVolume()
+                    if (!alarmPlayer.isSounding) mediaPlayer.unDuckVolume()
                     alarmPlayer.unDuckVolume()
                 }
             }
