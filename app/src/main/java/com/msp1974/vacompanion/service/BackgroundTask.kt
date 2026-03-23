@@ -25,7 +25,6 @@ import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Helpers
-import com.msp1974.vacompanion.utils.VolumeObserver
 import com.msp1974.vacompanion.wakeword.WakeWordEngine
 import com.msp1974.vacompanion.wakeword.WakeWordEngineModel
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
