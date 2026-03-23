@@ -100,6 +100,26 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var processingSound: String by Delegates.observable(DEFAULT_PROCESSING_SOUND) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
+    var errorSound: String by Delegates.observable(DEFAULT_ERROR_SOUND) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
+    var stopWordSound: String by Delegates.observable(DEFAULT_STOP_WORD_SOUND) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
+    var micOnSound: String by Delegates.observable(DEFAULT_MIC_ON_SOUND) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
+    var micOffSound: String by Delegates.observable(DEFAULT_MIC_OFF_SOUND) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var rawProximitySensorThreshold: Int by Delegates.observable(DEFAULT_RAW_PROXIMITY_THRESHOLD) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -286,6 +306,11 @@ class APPConfig(val context: Context) {
         settings["wake_word_engine"]?.jsonPrimitive?.contentOrNull?.let { wakeWordEngine = it }
         settings["wake_word"]?.jsonPrimitive?.contentOrNull?.let { wakeWord = it }
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
+        settings["processing_sound"]?.jsonPrimitive?.contentOrNull?.let { processingSound = it }
+        settings["error_sound"]?.jsonPrimitive?.contentOrNull?.let { errorSound = it }
+        settings["stop_word_sound"]?.jsonPrimitive?.contentOrNull?.let { stopWordSound = it }
+        settings["mic_on_sound"]?.jsonPrimitive?.contentOrNull?.let { micOnSound = it }
+        settings["mic_off_sound"]?.jsonPrimitive?.contentOrNull?.let { micOffSound = it }
         settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
         settings["raw_proximity_threshold"]?.asIntOrNull()?.let { rawProximitySensorThreshold = it }
         settings["notification_volume"]?.asIntOrNull()?.let { notificationVolume = it }
@@ -360,6 +385,11 @@ class APPConfig(val context: Context) {
         const val DEFAULT_RAW_PROXIMITY_THRESHOLD = 300
         const val DEFAULT_WAKE_WORD = "hey_jarvis"
         const val DEFAULT_WAKE_WORD_SOUND = "none"
+        const val DEFAULT_PROCESSING_SOUND = "processing"
+        const val DEFAULT_ERROR_SOUND = "error"
+        const val DEFAULT_STOP_WORD_SOUND = "stop_word"
+        const val DEFAULT_MIC_ON_SOUND = "mute_switch_on"
+        const val DEFAULT_MIC_OFF_SOUND = "mute_switch_off"
         const val DEFAULT_WAKE_WORD_THRESHOLD = 0.6f
         const val DEFAULT_NOTIFICATION_VOLUME = 10
         const val DEFAULT_MUSIC_VOLUME = 10

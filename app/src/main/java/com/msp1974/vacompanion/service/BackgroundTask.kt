@@ -172,10 +172,15 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                         audioRoute = AudioRouteOption.DETECT
                     }
                 }
-                try {
-                    soundClipPlayer.play(R.raw.processing)
-                } catch (e: Exception) {
-                    Timber.e("Error playing processing sound: ${e.message.toString()}")
+                if (config.processingSound != "none") {
+                    try {
+                        val resId = context.resources.getIdentifier(config.processingSound, "raw", context.packageName)
+                        if (resId != 0) {
+                            soundClipPlayer.play(resId)
+                        }
+                    } catch (e: Exception) {
+                        Timber.e("Error playing processing sound: ${e.message.toString()}")
+                    }
                 }
                 engine?.setStreaming(false)
             }
@@ -199,9 +204,27 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     val isMuted = event.newValue as Boolean
                     engine?.setMuted(isMuted)
                     if (isMuted) {
-                        soundClipPlayer.play(R.raw.mute_switch_on)
+                        if (config.micOnSound != "none") {
+                            try {
+                                val resId = context.resources.getIdentifier(config.micOnSound, "raw", context.packageName)
+                                if (resId != 0) {
+                                    soundClipPlayer.play(resId)
+                                }
+                            } catch (e: Exception) {
+                                Timber.e("Error playing mic on sound: ${e.message.toString()}")
+                            }
+                        }
                     } else {
-                        soundClipPlayer.play(R.raw.mute_switch_off)
+                        if (config.micOffSound != "none") {
+                            try {
+                                val resId = context.resources.getIdentifier(config.micOffSound, "raw", context.packageName)
+                                if (resId != 0) {
+                                    soundClipPlayer.play(resId)
+                                }
+                            } catch (e: Exception) {
+                                Timber.e("Error playing mic off sound: ${e.message.toString()}")
+                            }
+                        }
                     }
                     sendDiagnostics(0f,0f)
                 } catch (e: Exception) {
@@ -235,7 +258,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     }
                 }
             }
-            "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
+            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
                     try {
                         if (wakeWordJob != null && wakeWordJob!!.isActive) {
@@ -243,8 +266,17 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                         } else if (server.pipelineClient != null) {
                             runWakeWordDetection()
                         }
-                    } catch (e: SecurityException) {
+                    } catch (e: Exception) {
                         Timber.e("Error restarting wake word detection: ${e.message.toString()}")
+                    }
+                }
+            }
+            "wakeWordSound", "processingSound", "errorSound", "stopWordSound", "micOnSound", "micOffSound" -> {
+                scope.launch {
+                    try {
+                        warmUpAudioResources()
+                    } catch (e: Exception) {
+                        Timber.e("Error warming up audio resources: ${e.message.toString()}")
                     }
                 }
             }
@@ -265,11 +297,14 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     config.eventBroadcaster.notifyEvent(Event("showToastError", "", errorText))
                 }
 
-                if (config.wakeWordSound != "none") {
+                if (config.errorSound != "none") {
                     try {
-                        soundClipPlayer.play(R.raw.error)
+                        val resId = context.resources.getIdentifier(config.errorSound, "raw", context.packageName)
+                        if (resId != 0) {
+                            soundClipPlayer.play(resId)
+                        }
                     } catch (e: Exception) {
-                        Timber.e("Error playing wake word sound: ${e.message.toString()}")
+                        Timber.e("Error playing error sound: ${e.message.toString()}")
                     }
                 }
                 audioRoute = AudioRouteOption.DETECT
@@ -429,10 +464,15 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                                     context,
                                     BroadcastSender.STOP_WORD_DETECTED
                                 )
-                                try {
-                                    soundClipPlayer.play(R.raw.stop_word)
-                                } catch (e: Exception) {
-                                    Timber.e("Error playing stop word sound: ${e.message.toString()}")
+                                if (config.stopWordSound != "none") {
+                                    try {
+                                        val resId = context.resources.getIdentifier(config.stopWordSound, "raw", context.packageName)
+                                        if (resId != 0) {
+                                            soundClipPlayer.play(resId)
+                                        }
+                                    } catch (e: Exception) {
+                                        Timber.e("Error playing stop word sound: ${e.message.toString()}")
+                                    }
                                 }
                             }
                         }
@@ -585,13 +625,38 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     }
 
     private fun warmUpAudioResources() {
-        soundClipPlayer.prepare(R.raw.error)
-        soundClipPlayer.prepare(R.raw.stop_word)
-        soundClipPlayer.prepare(R.raw.processing)
-        soundClipPlayer.prepare(R.raw.mute_switch_on)
-        soundClipPlayer.prepare(R.raw.mute_switch_off)
+        if (config.micOnSound != "none") {
+            val resId = context.resources.getIdentifier(config.micOnSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+        if (config.micOffSound != "none") {
+            val resId = context.resources.getIdentifier(config.micOffSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
         if (config.wakeWordSound != "none") {
             val resId = context.resources.getIdentifier(config.wakeWordSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+        if (config.processingSound != "none") {
+            val resId = context.resources.getIdentifier(config.processingSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+        if (config.errorSound != "none") {
+            val resId = context.resources.getIdentifier(config.errorSound, "raw", context.packageName)
+            if (resId != 0) {
+                soundClipPlayer.prepare(resId)
+            }
+        }
+        if (config.stopWordSound != "none") {
+            val resId = context.resources.getIdentifier(config.stopWordSound, "raw", context.packageName)
             if (resId != 0) {
                 soundClipPlayer.prepare(resId)
             }
