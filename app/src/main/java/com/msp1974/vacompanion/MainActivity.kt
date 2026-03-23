@@ -232,16 +232,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 setScreenSaver(true)
                 screenWake()
             } else {
-                if (config.screenBrightness <= 0.3) config.screenBrightness = 0.6f
                 screen.setScreenBrightness(window, config.screenBrightness)
-
                 config.screenTimeout = screen.getScreenTimeout()
-                if (config.screenTimeout < 15000) config.screenTimeout = 15000
                 screen.setScreenTimeout(config.screenTimeout)
                 setScreenSaver(false)
             }
         } else if (viewModel.vacaState.value.satelliteRunning) {
-            screen.setScreenBrightness(window, config.screenBrightness)
             screen.setScreenAutoBrightness(window, config.screenAutoBrightness)
             screen.setScreenTimeout(config.screenTimeout)
             screen.setScreenAlwaysOn(window, config.screenAlwaysOn)
@@ -537,7 +533,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         screen.setScreenAlwaysOn(window, enabled)
                     }
                     "screenAutoBrightness" -> {
-                        if (screen.isScreenOn() and !viewModel.vacaState.value.screenBlank) {
+                        if (screen.isScreenOn() && !viewModel.vacaState.value.screenBlank) {
                             screen.setScreenAutoBrightness(
                                 window,
                                 event.newValue as Boolean
@@ -545,7 +541,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         }
                     }
                     "screenBrightness" -> {
-                        if (screen.isScreenOn() and !viewModel.vacaState.value.screenBlank) {
+                        if (screen.isScreenOn() && !viewModel.vacaState.value.screenBlank) {
                             screen.setScreenBrightness(window, event.newValue as Float)
                         }
                     }
