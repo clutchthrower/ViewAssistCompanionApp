@@ -53,6 +53,7 @@ class SatelliteActionHandler(
         val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
         config.playerVolume = volume
         mediaHandler.musicPlayer.updatePlayerVolume()
+        mediaHandler.pcmMediaPlayer.updatePlayerVolume()
     }
 
     private fun executeToast(payload: JsonObject) {

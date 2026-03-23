@@ -344,6 +344,11 @@ class SatelliteClientHandler(
         }
     }
 
+    override fun updateVolume() {
+        mediaHandler.musicPlayer.updatePlayerVolume()
+        mediaHandler.pcmMediaPlayer.updatePlayerVolume()
+    }
+
     private fun processSettingsPacket(packet: WyomingPacket) {
         val settingsStr = packet.getProp("settings").ifEmpty { packet.data.toString() }
         config.processSettings(settingsStr)

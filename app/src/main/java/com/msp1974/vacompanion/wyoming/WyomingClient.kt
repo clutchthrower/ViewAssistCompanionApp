@@ -15,5 +15,6 @@ interface WyomingClient {
     fun sendSetting(name: String, value: Any)
     fun onWakeWordDetected()
     fun processPacket(packet: WyomingPacket)
+    fun updateVolume()
     fun isActive(): Boolean
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
 
 class PCMMediaPlayer(context: Context) {
@@ -16,6 +17,7 @@ class PCMMediaPlayer(context: Context) {
     private val buffer = ByteArray(bufferSize)
     private var audioTrack: AudioTrack? = null
     @Volatile var isPlaying = false
+    private val config: APPConfig = APPConfig.getInstance(context)
 
     private fun createAudioTrack(): AudioTrack {
         val channels = if (channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
@@ -46,13 +48,25 @@ class PCMMediaPlayer(context: Context) {
             .build()
     }
 
+    fun updatePlayerVolume() {
+        audioTrack?.let { track ->
+            val gain = config.playerVolume / 100.0f
+            track.setVolume(gain)
+            log.d("Updated PCMMediaPlayer gain to ${config.playerVolume}%")
+        }
+    }
+
     fun play() {
         if (audioTrack != null) {
             stop(force = true)
         }
 
         isPlaying = true
-        audioTrack = createAudioTrack().apply { play() }
+        audioTrack = createAudioTrack().apply { 
+            val gain = config.playerVolume / 100.0f
+            setVolume(gain)
+            play() 
+        }
     }
 
     fun writeAudio(buffer: ByteArray) {

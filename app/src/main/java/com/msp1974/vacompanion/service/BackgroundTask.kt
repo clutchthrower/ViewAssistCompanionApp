@@ -246,6 +246,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             }
             "playerVolume" -> {
                 server.sendSetting("player_volume", event.newValue as Int)
+                server.pipelineClient?.updateVolume()
             }
             "alarmVolume" -> {
                 setVolume(AudioManager.STREAM_ALARM, event.newValue as Int)
