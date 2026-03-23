@@ -65,7 +65,7 @@ class MediaPlayer(val context: Context) {
                 mediaPlayer = player
 
                 val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
-                    .setUsage(AudioStream.Media.USAGE)
+                    .setUsage(AudioStream.Media.USAGE_EXO)
                     .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build()
                 player.setAudioAttributes(audioAttributes, true)

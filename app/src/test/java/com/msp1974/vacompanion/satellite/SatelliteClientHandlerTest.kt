@@ -145,7 +145,7 @@ class SatelliteClientHandlerTest {
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
         
         verify {
-            mediaHandler.pcmMediaPlayer.play()
+            mediaHandler.voicePlayer.play()
             mediaHandler.updateVolumeDucking("all", true)
         }
     }
@@ -156,12 +156,12 @@ class SatelliteClientHandlerTest {
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
-        every { mediaHandler.pcmMediaPlayer.isPlaying } returns true
+        every { mediaHandler.voicePlayer.isPlaying } returns true
         
         val payload = byteArrayOf(0, 1, 2)
         clientHandler.processPacket(WyomingPacket("audio-chunk", buildJsonObject {}, payload))
         
-        verify { mediaHandler.pcmMediaPlayer.writeAudio(payload) }
+        verify { mediaHandler.voicePlayer.writeAudio(payload) }
     }
 
     @Test
@@ -170,7 +170,7 @@ class SatelliteClientHandlerTest {
         clientHandler.processPacket(WyomingPacket("transcribe", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("synthesize", buildJsonObject {}))
         clientHandler.processPacket(WyomingPacket("audio-start", buildJsonObject {}))
-        every { mediaHandler.pcmMediaPlayer.isPlaying } returns true
+        every { mediaHandler.voicePlayer.isPlaying } returns true
         
         clientHandler.processPacket(WyomingPacket("audio-stop", buildJsonObject {}))
         
@@ -264,7 +264,7 @@ class SatelliteClientHandlerTest {
         clientHandler.processPacket(WyomingPacket("pause-satellite", buildJsonObject {}))
         
         verify(exactly = 0) {
-            mediaHandler.musicPlayer.stop()
+            mediaHandler.mediaPlayer.stop()
             server.onSatelliteStopped()
         }
     }

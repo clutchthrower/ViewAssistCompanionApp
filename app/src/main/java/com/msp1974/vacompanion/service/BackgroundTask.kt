@@ -239,10 +239,14 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             "wakeWord", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
                     try {
-                        if (wakeWordJob != null && wakeWordJob!!.isActive) {
-                            restartWakeWordDetection()
-                        } else if (server.pipelineClient != null) {
-                            runWakeWordDetection()
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            if (wakeWordJob != null && wakeWordJob!!.isActive) {
+                                restartWakeWordDetection()
+                            } else if (server.pipelineClient != null) {
+                                runWakeWordDetection()
+                            }
+                        } else {
+                            Timber.w("RECORD_AUDIO permission not granted; cannot start wake-word detection.")
                         }
                     } catch (e: Exception) {
                         Timber.e("Error restarting wake word detection: ${e.message.toString()}")

@@ -19,6 +19,7 @@ object AudioStream {
     object Media {
         const val STREAM = AudioManager.STREAM_MUSIC
         const val USAGE = AudioAttributes.USAGE_MEDIA
+        const val USAGE_EXO = androidx.media3.common.C.USAGE_MEDIA
         const val SETTING = "volume_music"
     }
 
@@ -29,6 +30,7 @@ object AudioStream {
     object Voice {
         const val STREAM = AudioManager.STREAM_NOTIFICATION
         const val USAGE = AudioAttributes.USAGE_NOTIFICATION
+        const val USAGE_EXO = androidx.media3.common.C.USAGE_NOTIFICATION
         const val SETTING = "volume_notification"
     }
 
@@ -39,6 +41,7 @@ object AudioStream {
     object Alarm {
         const val STREAM = AudioManager.STREAM_ALARM
         const val USAGE = AudioAttributes.USAGE_ALARM
+        const val USAGE_EXO = androidx.media3.common.C.USAGE_ALARM
         const val SETTING = "volume_alarm"
     }
     
@@ -48,5 +51,6 @@ object AudioStream {
      */
     object Feedback {
         const val USAGE = Voice.USAGE
+        const val USAGE_EXO = Voice.USAGE_EXO
     }
 }

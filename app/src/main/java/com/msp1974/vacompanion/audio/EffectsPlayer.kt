@@ -89,7 +89,7 @@ class EffectsPlayer(private val context: Context) {
         val player = ExoPlayer.Builder(context).build()
         val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioStream.Feedback.USAGE)
+            .setUsage(AudioStream.Feedback.USAGE_EXO)
             .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
             .build()
 

@@ -102,7 +102,7 @@ class RapidFireWakeWordTest {
         
         // FIXED: verify that onStopMediaPlayback is called with force=true
         // This confirms the "audio bleed" is addressed by flushing the player buffers.
-        verify { mediaHandler.pcmMediaPlayer.stop(force = true) } 
+        verify { mediaHandler.voicePlayer.stop(force = true) } 
         
         // 4. Simulate server finally sending pipeline-ended for Session 1
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}, sessionId = 1))
@@ -168,7 +168,7 @@ class RapidFireWakeWordTest {
         // 3. Verify S1 was stopped and audio-stop sent to server
         verify { 
             messenger.sendEvent(match { it.type == "audio-stop" && it.sessionId == 1 })
-            mediaHandler.pcmMediaPlayer.stop(force = true) 
+            mediaHandler.voicePlayer.stop(force = true) 
         }
         
         // 4. Simulate server cleanup of S1
@@ -191,7 +191,7 @@ class RapidFireWakeWordTest {
         clientHandler.onWakeWordDetected()
         
         // 3. Verify S1 was stopped (force-stop audio)
-        verify { mediaHandler.pcmMediaPlayer.stop(force = true) }
+        verify { mediaHandler.voicePlayer.stop(force = true) }
         
         // 4. Simulate server cleanup
         clientHandler.processPacket(WyomingPacket("pipeline-ended", buildJsonObject {}, sessionId = 1))
