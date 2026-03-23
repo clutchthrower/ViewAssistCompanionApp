@@ -5,6 +5,7 @@ import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.Logger
+import com.msp1974.vacompanion.utils.asIntOrNull
 import kotlinx.serialization.json.*
 
 /**
@@ -43,14 +44,14 @@ class SatelliteActionHandler(
     private fun executePlayMedia(payload: JsonObject) {
         val url = payload["url"]?.jsonPrimitive?.content ?: ""
         if (url.isNotEmpty()) {
-            val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
+            val volume = payload["volume"].asIntOrNull() ?: 100
             config.playerVolume = volume
             mediaHandler.musicPlayer.play(url)
         }
     }
 
     private fun executeSetVolume(payload: JsonObject) {
-        val volume = payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
+        val volume = payload["volume"].asIntOrNull() ?: 100
         config.playerVolume = volume
         mediaHandler.musicPlayer.updatePlayerVolume()
         mediaHandler.pcmMediaPlayer.updatePlayerVolume()

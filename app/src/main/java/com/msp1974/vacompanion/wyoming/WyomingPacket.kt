@@ -1,6 +1,7 @@
 package com.msp1974.vacompanion.wyoming
 
 import kotlinx.serialization.json.*
+import com.msp1974.vacompanion.utils.asIntOrNull
 import java.time.format.DateTimeFormatter
 import java.time.Instant
 
@@ -48,7 +49,7 @@ data class WyomingPacket (
      * Extracts an integer from the packet data.
      */
     fun getInt(prop: String, default: Int = 0): Int {
-        return data[prop]?.jsonPrimitive?.intOrNull ?: default
+        return data[prop].asIntOrNull() ?: default
     }
 
     fun toMap(): Map<String, Any> {

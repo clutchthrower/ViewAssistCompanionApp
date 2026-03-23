@@ -14,6 +14,7 @@ import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventNotifier
 import com.msp1974.vacompanion.utils.Logger
+import com.msp1974.vacompanion.utils.asIntOrNull
 import kotlinx.serialization.json.*
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -295,9 +296,6 @@ class APPConfig(val context: Context) {
         get() = this.sharedPrefs.getBoolean("always_ignore_ssl_errors", false)
         set(value) = this.sharedPrefs.edit { putBoolean("always_ignore_ssl_errors", value) }
 
-    private fun JsonElement?.asIntOrNull(): Int? {
-        return this?.jsonPrimitive?.intOrNull ?: this?.jsonPrimitive?.floatOrNull?.toInt()
-    }
 
     fun processSettings(settingString: String) {
         initSettings = true
