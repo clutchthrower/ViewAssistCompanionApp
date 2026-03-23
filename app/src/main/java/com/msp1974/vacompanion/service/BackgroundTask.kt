@@ -102,7 +102,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL, "wallPanel:wifiLock")
 
-        volumeObserver = VolumeObserver(context) { musicVolume, notificationVolume ->
+        volumeObserver = VolumeObserver(context) { musicVolume, notificationVolume, alarmVolume ->
             if (config.musicVolume != musicVolume) {
                 config.musicVolume = musicVolume
                 server.sendSetting("music_volume", musicVolume)
@@ -111,6 +111,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             if (config.notificationVolume != notificationVolume) {
                 config.notificationVolume = notificationVolume
                 server.sendSetting("notification_volume", notificationVolume)
+            }
+
+            if (config.alarmVolume != alarmVolume) {
+                config.alarmVolume = alarmVolume
+                server.sendSetting("alarm_volume", alarmVolume)
             }
         }
 

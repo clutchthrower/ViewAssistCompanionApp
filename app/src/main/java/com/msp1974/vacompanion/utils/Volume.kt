@@ -10,7 +10,7 @@ import android.provider.Settings
 
 class VolumeObserver(
     private val context: Context,
-    private val onVolumeChanged: (musicVolume:Int, notificationVolume:Int) -> Unit
+    private val onVolumeChanged: (musicVolume: Int, notificationVolume: Int, alarmVolume: Int) -> Unit
 ) : ContentObserver(Handler(Looper.getMainLooper())) {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -21,7 +21,8 @@ class VolumeObserver(
         // We check the "music" stream specifically, but you can check others
         val musicVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
         val notificationVolume = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
-        onVolumeChanged(musicVolume, notificationVolume)
+        val alarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+        onVolumeChanged(musicVolume, notificationVolume, alarmVolume)
     }
 
     fun register() {
