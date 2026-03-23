@@ -11,7 +11,7 @@ import com.msp1974.vacompanion.satellite.SatelliteCallback
 import com.msp1974.vacompanion.satellite.SatelliteServer
 import com.msp1974.vacompanion.satellite.SatelliteZeroconf
 import com.msp1974.vacompanion.wyoming.WyomingPacket
-import com.msp1974.vacompanion.audio.VolumeSyncManager
+import com.msp1974.vacompanion.satellite.DeviceSyncManager
 import com.msp1974.vacompanion.audio.EffectsPlayer
 import com.msp1974.vacompanion.audio.StreamVolumeManager as AudManager
 import com.msp1974.vacompanion.audio.MicrophoneInput
@@ -88,7 +88,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     private var sensorRunner: Sensors? = null
     lateinit var assetManager: AssetManager
     lateinit var server: SatelliteServer
-    private lateinit var volumeSyncManager: VolumeSyncManager
+    private lateinit var deviceSyncManager: DeviceSyncManager
     private val effectsPlayer = EffectsPlayer(context)
 
     private var motionTask = CameraBackgroundTask(context)
@@ -105,7 +105,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             @RequiresPermission(Manifest.permission.RECORD_AUDIO)
             override fun onSatelliteStarted() {
                 Timber.i("Background Task - Connection detected")
-                volumeSyncManager.onConnected()
+                deviceSyncManager.onConnected()
                 startSensors(context)
                 runWakeWordDetection()
                 warmUpAudioResources()
@@ -122,7 +122,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
                 terminateWakeWordDetection()
                 stopSensors()
-                volumeSyncManager.onDisconnected()
+                deviceSyncManager.onDisconnected()
                 zeroConf.registerService(config.serverPort)
             }
 
@@ -170,7 +170,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 engine?.setStreaming(false)
             }
         })
-        volumeSyncManager = VolumeSyncManager(context, server)
+        deviceSyncManager = DeviceSyncManager(context, server)
         thread(name="WyomingServer") { server.start() }
 
         // Add config change listeners
@@ -218,7 +218,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
             }
             "voice_volume", "media_volume", "media_player_gain", "alarm_volume", "do_not_disturb" -> {
-                volumeSyncManager.onSettingChange(event.eventName, event.newValue)
+                deviceSyncManager.onSettingChange(event.eventName, event.newValue)
             }
             "continueConversationStart" -> {
                 if (config.wakeWordSound != "none") {

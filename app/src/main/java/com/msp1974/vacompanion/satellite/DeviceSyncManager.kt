@@ -1,33 +1,45 @@
-package com.msp1974.vacompanion.audio
+package com.msp1974.vacompanion.satellite
 
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Context.NOTIFICATION_SERVICE
+import android.database.ContentObserver
 import android.media.AudioManager
-import com.msp1974.vacompanion.satellite.SatelliteServer
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import com.msp1974.vacompanion.audio.AudioStream
+import com.msp1974.vacompanion.audio.StreamVolumeManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Event
+import com.msp1974.vacompanion.utils.ScreenUtils
 import com.msp1974.vacompanion.utils.VolumeObserver
 import timber.log.Timber
+import kotlin.math.roundToInt
 
 /**
- * Manages synchronization of system volumes (Music, Notification, Alarm)
- * between the Android device and Home Assistant.
+ * Keeps the connected server (Home Assistant via Wyoming) aligned with device-mastered state:
+ * stream volumes, Do Not Disturb, screen brightness, and auto-brightness. Outbound updates use
+ * [SatelliteServer.sendSetting]; inbound changes from HA are applied in [onSettingChange].
  */
-class VolumeSyncManager(private val context: Context, private val server: SatelliteServer) {
+class DeviceSyncManager(private val context: Context, private val server: SatelliteServer) {
     private val config = APPConfig.getInstance(context)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val streamManager = StreamVolumeManager(context)
-    
-    // Observer for physical hardware button changes
+    private val screenUtils = ScreenUtils(context.applicationContext)
+
     private val volumeObserver = VolumeObserver(context) { media, voice, alarm ->
-        syncToHomeAssistant(media, voice, alarm)
+        syncVolumeLevelsIfChanged(media, voice, alarm)
     }
 
-    /**
-     * Initializes current truth values on connection.
-     */
+    private val brightnessObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            syncScreenFromHardwareIfChanged()
+        }
+    }
+
     fun onConnected() {
         if (!DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)) {
             config.voiceVolume = audioManager.getStreamVolume(AudioStream.Voice.STREAM)
@@ -36,25 +48,60 @@ class VolumeSyncManager(private val context: Context, private val server: Satell
         config.alarmVolume = audioManager.getStreamVolume(AudioStream.Alarm.STREAM)
         config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
 
-        // Push initial truth to HA (hardware-mastered streams only)
         server.sendSetting("media_volume", config.mediaVolume)
         server.sendSetting("voice_volume", config.voiceVolume)
         server.sendSetting("alarm_volume", config.alarmVolume)
         server.sendSetting("do_not_disturb", config.doNotDisturb)
-        
+
+        val brightness = screenUtils.getScreenBrightness()
+        val autoBrightness = screenUtils.getScreenAutoBrightnessMode()
+        config.screenBrightness = brightness
+        config.screenAutoBrightness = autoBrightness
+        server.sendSetting("screen_brightness", brightnessPercent(brightness))
+        server.sendSetting("screen_auto_brightness", autoBrightness)
+
         volumeObserver.register()
+        context.contentResolver.registerContentObserver(
+            Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS),
+            false,
+            brightnessObserver,
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE),
+            false,
+            brightnessObserver,
+        )
     }
 
-    /**
-     * Cleans up on disconnection.
-     */
     fun onDisconnected() {
         volumeObserver.unregister()
+        context.contentResolver.unregisterContentObserver(brightnessObserver)
     }
 
     /**
-     * Responds to volume and system status changes from Home Assistant.
+     * Re-read system brightness and auto-brightness; push when values differ from config.
+     * Invoked from [brightnessObserver] when [Settings.System] brightness settings change.
      */
+    private fun syncScreenFromHardwareIfChanged() {
+        val brightness = screenUtils.getScreenBrightness()
+        val autoBrightness = screenUtils.getScreenAutoBrightnessMode()
+        val pct = brightnessPercent(brightness)
+        val configPct = brightnessPercent(config.screenBrightness)
+        if (configPct != pct) {
+            Timber.d("DeviceSync - screen brightness: ${pct}% (was ${configPct}%)")
+            config.screenBrightness = brightness
+            server.sendSetting("screen_brightness", pct)
+        }
+        if (config.screenAutoBrightness != autoBrightness) {
+            Timber.d("DeviceSync - auto brightness: $autoBrightness (was ${config.screenAutoBrightness})")
+            config.screenAutoBrightness = autoBrightness
+            server.sendSetting("screen_auto_brightness", autoBrightness)
+        }
+    }
+
+    private fun brightnessPercent(level: Float): Int =
+        (level * 100f).roundToInt().coerceIn(0, 100)
+
     fun onSettingChange(name: String, value: Any) {
         try {
             when (name) {
@@ -70,8 +117,6 @@ class VolumeSyncManager(private val context: Context, private val server: Satell
                     streamManager.setVolume(AudioStream.Alarm.STREAM, value as Int)
                 }
                 "media_player_gain" -> {
-                    // Software gain for the Home Assistant media player entity
-                    // The property was already updated via processSettings, we just need to notify the UI/Players.
                     server.pipelineClient?.updateVolume()
                 }
                 "do_not_disturb" -> {
@@ -108,21 +153,21 @@ class VolumeSyncManager(private val context: Context, private val server: Satell
         }
     }
 
-    private fun syncToHomeAssistant(media: Int, voice: Int, alarm: Int) {
+    private fun syncVolumeLevelsIfChanged(media: Int, voice: Int, alarm: Int) {
         if (config.mediaVolume != media) {
-            Timber.d("VolumeSyncManager - Local media volume change: $media (was ${config.mediaVolume})")
+            Timber.d("DeviceSync - media volume: $media (was ${config.mediaVolume})")
             config.mediaVolume = media
             server.sendSetting("media_volume", media)
         }
 
         if (config.voiceVolume != voice) {
-            Timber.d("VolumeSyncManager - Local voice volume change: $voice (was ${config.voiceVolume})")
+            Timber.d("DeviceSync - voice volume: $voice (was ${config.voiceVolume})")
             config.voiceVolume = voice
             server.sendSetting("voice_volume", voice)
         }
 
         if (config.alarmVolume != alarm) {
-            Timber.d("VolumeSyncManager - Local alarm volume change: $alarm (was ${config.alarmVolume})")
+            Timber.d("DeviceSync - alarm volume: $alarm (was ${config.alarmVolume})")
             config.alarmVolume = alarm
             server.sendSetting("alarm_volume", alarm)
         }
