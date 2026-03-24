@@ -185,11 +185,11 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     override fun onEventTriggered(event: Event) {
         var consumed = true
         when (event.eventName) {
-            "micEnabled" -> {
+            "micMuted" -> {
                 try {
-                    val micEnabled = event.newValue as Boolean
-                    engine?.setMuted(!micEnabled)
-                    if (micEnabled) {
+                    val micMuted = event.newValue as Boolean
+                    engine?.setMuted(micMuted)
+                    if (!micMuted) {
                         if (config.micOnSound != "none") {
                             try {
                                 val resId = context.resources.getIdentifier(config.micOnSound, "raw", context.packageName)

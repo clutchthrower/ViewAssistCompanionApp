@@ -147,7 +147,7 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var micEnabled: Boolean by Delegates.observable(DEFAULT_MIC_ENABLED) { property, oldValue, newValue ->
+    var micMuted: Boolean by Delegates.observable(DEFAULT_MIC_MUTED) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -331,7 +331,7 @@ class APPConfig(val context: Context) {
         settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
-        settings["mic"]?.jsonPrimitive?.booleanOrNull?.let { micEnabled = it }
+        settings["mic_mute"]?.jsonPrimitive?.booleanOrNull?.let { micMuted = it }
         settings["echo_cancellation_mode"]?.jsonPrimitive?.contentOrNull?.let { echoCancellationMode = it }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
         settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
@@ -424,7 +424,7 @@ class APPConfig(val context: Context) {
         const val DEFAULT_SCREEN_AUTO_BRIGHTNESS = true
         const val DEFAULT_SWIPE_REFRESH = true
         const val DEFAULT_DUCKING_VOLUME = 70
-        const val DEFAULT_MIC_ENABLED = true
+        const val DEFAULT_MIC_MUTED = false
         const val DEFAULT_MIC_GAIN = 0
         const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 50
         const val DEFAULT_MIC_AUDIO_SOURCE = "voice_recognition"

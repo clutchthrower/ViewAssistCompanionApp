@@ -76,7 +76,7 @@ class APPConfigTest {
                 "ha_port": 8080,
                 "ha_url": "http://mock-url.com",
                 "wake_word_engine": "porcupine",
-                "mic": false,
+                "mic_mute": true,
                 "screen_brightness": 70,
                 "noise_suppression_level": 80
             }
@@ -88,7 +88,7 @@ class APPConfigTest {
         assertEquals(8080, config.homeAssistantHTTPPort)
         assertEquals("http://mock-url.com", config.homeAssistantURL)
         assertEquals("porcupine", config.wakeWordEngine)
-        assertEquals(false, config.micEnabled)
+        assertEquals(true, config.micMuted)
         assertEquals(0.7f, config.screenBrightness, 0.001f)
         assertEquals(80, config.noiseSuppressionLevel)
     }
