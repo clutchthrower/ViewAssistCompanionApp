@@ -85,9 +85,6 @@ class APPConfig(val context: Context) {
     var ignoreSSLErrors: Boolean = alwaysIgnoreSSLErrors
 
     //In memory settings with change notification
-    var useAdvancedGain: Boolean by Delegates.observable(false) { property, oldValue, newValue ->
-        onValueChangedListener(property, oldValue, newValue)
-    }
 
     var wakeWordEngine: String by Delegates.observable("openwakeword") { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
@@ -308,7 +305,6 @@ class APPConfig(val context: Context) {
         settings["ha_port"]?.asIntOrNull()?.let { homeAssistantHTTPPort = it }
         settings["ha_url"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantURL = it }
         settings["ha_dashboard"]?.jsonPrimitive?.contentOrNull?.let { homeAssistantDashboard = it }
-        settings["advanced_gain"]?.jsonPrimitive?.booleanOrNull?.let { useAdvancedGain = it }
         settings["wake_word_engine"]?.jsonPrimitive?.contentOrNull?.let { wakeWordEngine = it }
         settings["wake_word"]?.jsonPrimitive?.contentOrNull?.let { wakeWord = it }
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
