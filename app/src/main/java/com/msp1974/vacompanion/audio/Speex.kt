@@ -116,7 +116,7 @@ class SpeexProcessor(
     
     /**
      * Set AGC target level
-     * @param level Target level in dB (typically 8000-32000)
+     * @param level Target peak amplitude in raw PCM samples (typically 8000-32000)
      */
     fun setAGCLevel(level: Int) {
         agcState.targetLevel = level
