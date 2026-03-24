@@ -139,10 +139,14 @@ class OpenWakeWordEngine(
     override fun start() = muted.flatMapLatest {
         if (it) emptyFlow()
         else flow {
+            val audioSource = MicrophoneInput.mapAudioSource(config.micAudioSource)
             val microphoneInput = MicrophoneInput(
+                context = context,
+                audioSource = audioSource,
                 frameSize = 1280,
                 gainProvider = { config.micGain },
-                noiseSuppressionProvider = { config.noiseSuppressionLevel }
+                noiseSuppressionProvider = { config.noiseSuppressionLevel },
+                echoCancellationModeProvider = { config.echoCancellationMode }
             )
             try {
                 microphoneInput.start()

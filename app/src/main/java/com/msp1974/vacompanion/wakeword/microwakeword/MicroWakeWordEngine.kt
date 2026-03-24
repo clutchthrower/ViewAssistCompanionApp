@@ -61,9 +61,13 @@ open class MicroWakeWordEngine (
         // Stop microphone when muted
         if (it) emptyFlow()
         else flow {
+            val audioSource = MicrophoneInput.mapAudioSource(config.micAudioSource)
             val microphoneInput = MicrophoneInput(
+                context = context,
+                audioSource = audioSource,
                 gainProvider = { config.micGain },
-                noiseSuppressionProvider = { config.noiseSuppressionLevel }
+                noiseSuppressionProvider = { config.noiseSuppressionLevel },
+                echoCancellationModeProvider = { config.echoCancellationMode }
             )
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value

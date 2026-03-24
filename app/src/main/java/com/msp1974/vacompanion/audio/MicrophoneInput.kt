@@ -1,12 +1,15 @@
 package com.msp1974.vacompanion.audio
 
 import android.Manifest
+import android.content.Context
+import android.media.AudioManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
+import androidx.annotation.VisibleForTesting
 import androidx.annotation.RequiresPermission
 import timber.log.Timber
 import java.nio.ByteBuffer
@@ -14,6 +17,7 @@ import java.nio.ByteOrder
 import kotlin.math.pow
 
 class MicrophoneInput(
+    private val context: Context? = null,
     val audioSource: Int = DEFAULT_AUDIO_SOURCE,
     val sampleRateInHz: Int = DEFAULT_SAMPLE_RATE_IN_HZ,
     val channelConfig: Int = DEFAULT_CHANNEL_CONFIG,
@@ -31,7 +35,21 @@ class MicrophoneInput(
      * Provides the current noise suppression level for Speex (0 = off, 15 = max).
      */
     private val noiseSuppressionProvider: () -> Int = { 50 },
+    /**
+     * Echo cancellation mode:
+     * - "platform": use Android AcousticEchoCanceler
+     * - "software": use Speex echo suppression in-app
+     */
+    private val echoCancellationModeProvider: () -> String = { "platform" },
 ) : AutoCloseable {
+    data class EchoDiagnostics(
+        val requestedEchoMode: String,
+        val activeEchoMode: String,
+        val platformAecAvailable: Boolean,
+        val platformAecEnabled: Boolean,
+    )
+
+    private val logTag = "MicrophoneInput"
     private val bufferSize =
         AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat)
     private var audioRecord: AudioRecord? = null
@@ -39,17 +57,28 @@ class MicrophoneInput(
     private var aec: AcousticEchoCanceler? = null
     private var agc: AutomaticGainControl? = null
     private var ns: NoiseSuppressor? = null
+    private var previousAudioMode: Int? = null
 
     private var audioDSP = AudioDSP()
 
     val isRecording get() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
     val speex = SpeexProcessor(sampleRate = DEFAULT_SAMPLE_RATE_IN_HZ, frameSize = if (frameSize > 0) frameSize else bufferSize )
+    
+    private fun isSoftwareEchoMode(): Boolean =
+        echoCancellationModeProvider().lowercase() == "software"
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
         if (audioRecord == null) {
-            audioRecord = createAudioRecord()
-            setupAudioEffects()
+            try {
+                audioRecord = createAudioRecord()
+                configureCommunicationAudioMode(enable = true)
+                setupAudioEffects()
+            } catch (e: Exception) {
+                Timber.e("$logTag: Failed to initialize microphone input: ${e.message}")
+                close()
+                throw e
+            }
         }
 
         if (!isRecording) {
@@ -88,6 +117,7 @@ class MicrophoneInput(
             }
 
             if (useSpeex) {
+                speex.echoSuppressionEnabled = isSoftwareEchoMode()
                 speex.setDenoiseSuppression(noiseSuppressionProvider())
                 speex.setAGCLevel(20000)
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
@@ -125,20 +155,82 @@ class MicrophoneInput(
 
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
+        val useSoftwareEcho = isSoftwareEchoMode()
+        val requestedEchoMode = if (useSoftwareEcho) "software" else "platform"
+        val platformAecAvailable = AcousticEchoCanceler.isAvailable()
+        var platformAecEnabled = false
+        var activeEchoMode = if (useSoftwareEcho) "software" else "none"
         try {
-            aec = AcousticEchoCanceler.create(sessionId)
-            aec?.enabled = true
-        } catch (e: Exception) {}
+            if (!useSoftwareEcho && platformAecAvailable) {
+                aec = AcousticEchoCanceler.create(sessionId)
+                aec?.enabled = true
+                platformAecEnabled = aec?.enabled == true
+                if (platformAecEnabled) {
+                    activeEchoMode = "platform"
+                }
+            } else if (useSoftwareEcho) {
+                Timber.d("$logTag: Using software echo suppression (Speex); platform AEC disabled")
+            } else {
+                Timber.d("$logTag: AEC is not available on this device")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Failed to enable AEC: ${e.message}")
+        }
 
         try {
-            agc = AutomaticGainControl.create(sessionId)
-            agc?.enabled = true
-        } catch (e: Exception) {}
+            if (AutomaticGainControl.isAvailable()) {
+                agc = AutomaticGainControl.create(sessionId)
+                agc?.enabled = true
+            } else {
+                Timber.d("$logTag: AGC is not available on this device")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Failed to enable AGC: ${e.message}")
+        }
 
         try {
-            ns = NoiseSuppressor.create(sessionId)
-            ns?.enabled = true
-        } catch (e: Exception) {}
+            if (NoiseSuppressor.isAvailable()) {
+                ns = NoiseSuppressor.create(sessionId)
+                ns?.enabled = true
+            } else {
+                Timber.d("$logTag: NS is not available on this device")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Failed to enable NS: ${e.message}")
+        }
+
+        updateEchoDiagnostics(
+            requestedEchoMode = requestedEchoMode,
+            activeEchoMode = activeEchoMode,
+            platformAecAvailable = platformAecAvailable,
+            platformAecEnabled = platformAecEnabled,
+        )
+    }
+
+    private fun configureCommunicationAudioMode(enable: Boolean) {
+        if (audioSource != MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+            return
+        }
+        val audioManager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (audioManager == null) {
+            Timber.w("$logTag: Unable to access AudioManager for VOICE_COMMUNICATION mode")
+            return
+        }
+        if (enable) {
+            if (previousAudioMode == null) {
+                previousAudioMode = audioManager.mode
+            }
+            if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            }
+            Timber.d("$logTag: Enabled MODE_IN_COMMUNICATION for VOICE_COMMUNICATION source")
+        } else {
+            previousAudioMode?.let { mode ->
+                audioManager.mode = mode
+                Timber.d("$logTag: Restored audio mode to $mode")
+            }
+            previousAudioMode = null
+        }
     }
 
 
@@ -157,6 +249,7 @@ class MicrophoneInput(
             it.release()
             audioRecord = null
         }
+        configureCommunicationAudioMode(enable = false)
     }
 
     companion object {
@@ -165,5 +258,51 @@ class MicrophoneInput(
         const val DEFAULT_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val DEFAULT_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         const val BUFFER_SIZE_IN_SHORTS = 1280
+
+        fun mapAudioSource(source: String): Int = when (source.lowercase()) {
+            "voice_communication" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            "voice_recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+            else -> DEFAULT_AUDIO_SOURCE
+        }
+
+        @Volatile
+        private var _echoDiagnostics = EchoDiagnostics(
+            requestedEchoMode = "platform",
+            activeEchoMode = "none",
+            platformAecAvailable = false,
+            platformAecEnabled = false,
+        )
+
+        @Synchronized
+        private fun updateEchoDiagnostics(
+            requestedEchoMode: String,
+            activeEchoMode: String,
+            platformAecAvailable: Boolean,
+            platformAecEnabled: Boolean,
+        ) {
+            _echoDiagnostics = EchoDiagnostics(
+                requestedEchoMode = requestedEchoMode,
+                activeEchoMode = activeEchoMode,
+                platformAecAvailable = platformAecAvailable,
+                platformAecEnabled = platformAecEnabled,
+            )
+        }
+
+        fun getEchoDiagnostics(): EchoDiagnostics = _echoDiagnostics
+
+        @VisibleForTesting
+        internal fun setEchoDiagnosticsForTesting(
+            requestedEchoMode: String,
+            activeEchoMode: String,
+            platformAecAvailable: Boolean,
+            platformAecEnabled: Boolean,
+        ) {
+            updateEchoDiagnostics(
+                requestedEchoMode = requestedEchoMode,
+                activeEchoMode = activeEchoMode,
+                platformAecAvailable = platformAecAvailable,
+                platformAecEnabled = platformAecEnabled,
+            )
+        }
     }
 }

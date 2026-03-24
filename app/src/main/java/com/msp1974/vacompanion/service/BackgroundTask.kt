@@ -236,7 +236,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     }
                 }
             }
-            "wakeWord", "wakeWordThreshold", "wakeWordEngine" -> {
+            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "mic_audio_source", "echo_cancellation_mode" -> {
                 scope.launch {
                     try {
                         if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -477,6 +477,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     is WakeWordEngineProvider.AudioResult.EngineStatus -> {
                         Timber.i("Engine status: ${it.status}")
                         engineStarted = it.status == "Started"
+                        if (engineStarted) {
+                            sendAudioInputDiagnosticsStatus()
+                        }
                     }
 
                 }
@@ -564,6 +567,22 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             val event = Event("diagnosticStats", "", data)
             config.eventBroadcaster.notifyEvent(event)
         }
+    }
+
+    private fun sendAudioInputDiagnosticsStatus() {
+        val diagnostics = MicrophoneInput.getEchoDiagnostics()
+        server.sendStatus(
+            buildJsonObject {
+                put("timestamp", Date().toString())
+                putJsonObject("sensors") {
+                    put("mic_audio_source", config.micAudioSource)
+                    put("requested_echo_mode", diagnostics.requestedEchoMode)
+                    put("active_echo_mode", diagnostics.activeEchoMode)
+                    put("platform_aec_available", diagnostics.platformAecAvailable)
+                    put("platform_aec_enabled", diagnostics.platformAecEnabled)
+                }
+            }
+        )
     }
 
     private fun warmUpAudioResources() {

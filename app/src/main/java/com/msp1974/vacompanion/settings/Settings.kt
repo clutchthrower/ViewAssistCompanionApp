@@ -159,6 +159,14 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var micAudioSource: String by Delegates.observable(DEFAULT_MIC_AUDIO_SOURCE) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+    
+    var echoCancellationMode: String by Delegates.observable(DEFAULT_ECHO_CANCELLATION_MODE) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var screenBrightness: Float by Delegates.observable(DEFAULT_SCREEN_BRIGHTNESS) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -319,10 +327,12 @@ class APPConfig(val context: Context) {
         settings["media_volume"]?.asIntOrNull()?.let { mediaVolume = it }
         settings["media_player_gain"]?.asIntOrNull()?.let { mediaPlayerGain = it }
         settings["noise_suppression_level"]?.asIntOrNull()?.let { noiseSuppressionLevel = it }
+        settings["mic_audio_source"]?.jsonPrimitive?.contentOrNull?.let { micAudioSource = it }
         settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
         settings["mic"]?.jsonPrimitive?.booleanOrNull?.let { micEnabled = it }
+        settings["echo_cancellation_mode"]?.jsonPrimitive?.contentOrNull?.let { echoCancellationMode = it }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
         settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
         settings["swipe_refresh"]?.jsonPrimitive?.booleanOrNull?.let { swipeRefresh = it }
@@ -383,6 +393,8 @@ class APPConfig(val context: Context) {
                 "alarmVolume" -> "alarm_volume"
                 "duckingVolume" -> "ducking_volume"
                 "micGain" -> "mic_gain"
+                "micAudioSource" -> "mic_audio_source"
+                "echoCancellationMode" -> "echo_cancellation_mode"
                 "doNotDisturb" -> "do_not_disturb"
                 else -> property.name
             }
@@ -415,6 +427,8 @@ class APPConfig(val context: Context) {
         const val DEFAULT_MIC_ENABLED = true
         const val DEFAULT_MIC_GAIN = 0
         const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 50
+        const val DEFAULT_MIC_AUDIO_SOURCE = "voice_recognition"
+        const val DEFAULT_ECHO_CANCELLATION_MODE = "platform"
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
 
         @Volatile
