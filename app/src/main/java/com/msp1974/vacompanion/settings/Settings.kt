@@ -158,6 +158,10 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var noiseSuppressionLevel: Int by Delegates.observable(DEFAULT_NOISE_SUPPRESSION_LEVEL) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var screenBrightness: Float by Delegates.observable(DEFAULT_SCREEN_BRIGHTNESS) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -318,6 +322,7 @@ class APPConfig(val context: Context) {
         settings["voice_volume"]?.asIntOrNull()?.let { voiceVolume = it }
         settings["media_volume"]?.asIntOrNull()?.let { mediaVolume = it }
         settings["media_player_gain"]?.asIntOrNull()?.let { mediaPlayerGain = it }
+        settings["noise_suppression_level"]?.asIntOrNull()?.let { noiseSuppressionLevel = it }
         settings["alarm_volume"]?.asIntOrNull()?.let { alarmVolume = it }
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
@@ -413,6 +418,7 @@ class APPConfig(val context: Context) {
         const val DEFAULT_DUCKING_VOLUME = 70
         const val DEFAULT_MIC_ENABLED = true
         const val DEFAULT_MIC_GAIN = 0
+        const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 50
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
 
         @Volatile

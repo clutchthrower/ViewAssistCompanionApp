@@ -27,6 +27,10 @@ class MicrophoneInput(
      * 20 dB = 10x amplitude multiplier.
      */
     private val gainProvider: () -> Int = { 0 },
+    /**
+     * Provides the current noise suppression level for Speex (0 = off, 15 = max).
+     */
+    private val noiseSuppressionProvider: () -> Int = { 50 },
 ) : AutoCloseable {
     private val bufferSize =
         AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat)
@@ -84,7 +88,7 @@ class MicrophoneInput(
             }
 
             if (useSpeex) {
-                speex.setDenoiseSuppression(10)
+                speex.setDenoiseSuppression(noiseSuppressionProvider())
                 speex.setAGCLevel(20000)
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }

@@ -108,10 +108,10 @@ class SpeexProcessor(
     
     /**
      * Set denoise suppression level
-     * @param level 0 to 15 (higher = more aggressive)
+     * @param level 0 to 100 (higher = more aggressive % suppression)
      */
     fun setDenoiseSuppression(level: Int) {
-        denoiseState.suppressionLevel = level.coerceIn(0, 15)
+        denoiseState.suppressionLevel = level.coerceIn(0, 100)
     }
     
     /**
@@ -145,7 +145,7 @@ class SpeexProcessor(
  * Denoise State - Implements spectral noise suppression
  */
 private class DenoiseState(private val frameSize: Int) {
-    var suppressionLevel = 10
+    var suppressionLevel = 50
     private val noiseEstimate = FloatArray(frameSize)
     private val smoothingFactor = 0.9f
     private var frameCount = 0
@@ -166,7 +166,7 @@ private class DenoiseState(private val frameSize: Int) {
         }
         
         // Apply noise suppression
-        val suppressionFactor = suppressionLevel / 15f
+        val suppressionFactor = suppressionLevel / 100f
         for (i in floatInput.indices) {
             val signalLevel = abs(floatInput[i])
             val noiseLevel = noiseEstimate[i] * suppressionFactor
