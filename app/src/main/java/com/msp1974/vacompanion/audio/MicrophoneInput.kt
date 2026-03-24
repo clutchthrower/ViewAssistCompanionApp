@@ -58,14 +58,25 @@ class MicrophoneInput(
     private var agc: AutomaticGainControl? = null
     private var ns: NoiseSuppressor? = null
     private var previousAudioMode: Int? = null
+    private var apm: com.bk.webrtc.Apm? = null
+
+    // High-Pass Filter State (approx 80Hz cutoff at 16kHz)
+    private var hpfLastIn = 0f
+    private var hpfLastOut = 0f
+    private val hpfAlpha = 0.96f
+
+    // Audio level estimators (normalized 0.0f to 1.0f)
+    @Volatile
+    var currentRms: Float = 0f
+        private set
+    @Volatile
+    var currentPeak: Float = 0f
+        private set
 
     private var audioDSP = AudioDSP()
 
     val isRecording get() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
     val speex = SpeexProcessor(sampleRate = DEFAULT_SAMPLE_RATE_IN_HZ, frameSize = if (frameSize > 0) frameSize else bufferSize )
-    
-    private fun isSoftwareEchoMode(): Boolean =
-        echoCancellationModeProvider().lowercase() == "software"
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
@@ -98,7 +109,7 @@ class MicrophoneInput(
         return buffer
     }
 
-    fun readShort(bufferSize: Int = BUFFER_SIZE_IN_SHORTS, useSpeex: Boolean = true): ShortArray {
+    fun readShort(bufferSize: Int = BUFFER_SIZE_IN_SHORTS, applySoftwareEffects: Boolean = true): ShortArray {
         val audioBuffer = ShortArray(bufferSize)
         val audioRecord = this.audioRecord ?: error("Microphone not started")
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
@@ -116,14 +127,56 @@ class MicrophoneInput(
                 }
             }
 
-            if (useSpeex) {
-                speex.echoSuppressionEnabled = isSoftwareEchoMode()
-                speex.setDenoiseSuppression(noiseSuppressionProvider())
-                speex.setAGCLevel(20000)
-                return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
+            val echoMode = echoCancellationModeProvider().lowercase()
+            val shouldRunSpeex = applySoftwareEffects && echoMode == "speex"
+            val shouldRunWebRtc = applySoftwareEffects && echoMode == "webrtc" && apm != null
+
+            // 1. High-Pass Filter (Skip if WebRTC handles it internally)
+            if (!shouldRunWebRtc) {
+                for (i in 0 until readCount) {
+                    val input = audioBuffer[i].toFloat()
+                    val filtered = input - hpfLastIn + hpfAlpha * hpfLastOut
+                    hpfLastIn = input
+                    hpfLastOut = filtered
+                    audioBuffer[i] = filtered
+                        .toInt()
+                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                        .toShort()
+                }
             }
 
-            return audioBuffer.copyOfRange(0, readCount)
+            // 2. Main Processing Block (AEC and NS)
+            val processedBuffer = if (shouldRunWebRtc) {
+                for (offset in 0 until readCount step 160) {
+                    if (offset + 160 <= readCount) {
+                        apm?.ProcessCaptureStream(audioBuffer, offset)
+                    }
+                }
+                audioBuffer.copyOfRange(0, readCount)
+            } else if (shouldRunSpeex) {
+                speex.echoSuppressionEnabled = true
+                speex.setDenoiseSuppression(noiseSuppressionProvider())
+                speex.setAGCLevel(20000)
+                speex.processFrame(audioBuffer.copyOfRange(0, readCount))
+            } else {
+                audioBuffer.copyOfRange(0, readCount)
+            }
+
+            // 3. Level Estimation (Metrics extraction from finalized buffer)
+            var sumSquares = 0f
+            var peakVal = 0f
+
+            for (i in 0 until processedBuffer.size) {
+                val amplitude = Math.abs(processedBuffer[i].toInt()).toFloat()
+                sumSquares += amplitude * amplitude
+                if (amplitude > peakVal) {
+                    peakVal = amplitude
+                }
+            } // Update volatile metrics (normalized 0..1)
+            this.currentRms = kotlin.math.sqrt(sumSquares / processedBuffer.size) / 32768f
+            this.currentPeak = peakVal / 32768f
+
+            return processedBuffer
         }
         return ShortArray(0)
     }
@@ -155,21 +208,26 @@ class MicrophoneInput(
 
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
-        val useSoftwareEcho = isSoftwareEchoMode()
-        val requestedEchoMode = if (useSoftwareEcho) "software" else "platform"
+        val echoMode = echoCancellationModeProvider().lowercase()
+        val isHardwareMode = echoMode == "hardware"
+        val isWebRtcMode = echoMode == "webrtc"
+        val isSoftwareMode = echoMode == "speex"
+        
+        val requestedEchoMode = echoMode
         val platformAecAvailable = AcousticEchoCanceler.isAvailable()
         var platformAecEnabled = false
-        var activeEchoMode = if (useSoftwareEcho) "software" else "none"
+        var activeEchoMode = if (isHardwareMode) "none" else requestedEchoMode
+        
         try {
-            if (!useSoftwareEcho && platformAecAvailable) {
+            if (isHardwareMode && platformAecAvailable) {
                 aec = AcousticEchoCanceler.create(sessionId)
                 aec?.enabled = true
                 platformAecEnabled = aec?.enabled == true
                 if (platformAecEnabled) {
-                    activeEchoMode = "platform"
+                    activeEchoMode = "hardware"
                 }
-            } else if (useSoftwareEcho) {
-                Timber.d("$logTag: Using software echo suppression (Speex); platform AEC disabled")
+            } else if (!isHardwareMode) {
+                Timber.d("$logTag: Platform AEC disabled manually. Requested: $requestedEchoMode")
             } else {
                 Timber.d("$logTag: AEC is not available on this device")
             }
@@ -177,8 +235,45 @@ class MicrophoneInput(
             Timber.w("$logTag: Failed to enable AEC: ${e.message}")
         }
 
+        if (isWebRtcMode) {
+            try {
+                apm = com.bk.webrtc.Apm(
+                    /* aecExtendFilter = */ true,
+                    /* speechIntelligibilityEnhance = */ false, // Off: Alters speaker playback, interferes with AI AEC
+                    /* delayAgnostic = */ true,
+                    /* beamforming = */ false, // Off: We capture mono, no spatial array available
+                    /* nextGenerationAec = */ true,
+                    /* experimentalNs = */ true, // On: Enables Transient Noise Suppression (keyboard clicks/thumps)
+                    /* experimentalAgc = */ false // Off: Causes volume "pumping" which breaks neural wake-word models
+                )
+                // 1. High-Pass Filter (Remove rumble/DC offset first)
+                apm?.HighPassFilter(true)
+                
+                // 2. Acoustic Echo Cancellation (Subtract speaker audio before any distortion)
+                apm?.AEC(true)
+                apm?.AECClockDriftCompensation(false)
+                apm?.AECSetSuppressionLevel(com.bk.webrtc.Apm.AEC_SuppressionLevel.ModerateSuppression)
+
+                // 3. Noise Suppression (Remove background hiss/transients after echo is gone)
+                apm?.NS(true)
+                apm?.NSSetLevel(com.bk.webrtc.Apm.NS_Level.High)
+
+                // 4. Automatic Gain Control (Normalize the final cleaned volume last)
+                apm?.AGC(true)
+                apm?.AGCSetTargetLevelDbfs(3)
+                apm?.AGCSetcompressionGainDb(90)
+                apm?.AGCSetMode(com.bk.webrtc.Apm.AGC_Mode.AdaptiveDigital)
+                apm?.AGCEnableLimiter(true)
+                Timber.d("$logTag: WebRTC APM initialized successfully")
+            } catch (e: Exception) {
+                Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
+                apm = null
+                activeEchoMode = "none"
+            }
+        }
+
         try {
-            if (AutomaticGainControl.isAvailable()) {
+            if (isHardwareMode && AutomaticGainControl.isAvailable()) {
                 agc = AutomaticGainControl.create(sessionId)
                 agc?.enabled = true
             } else {
@@ -189,7 +284,7 @@ class MicrophoneInput(
         }
 
         try {
-            if (NoiseSuppressor.isAvailable()) {
+            if (isHardwareMode && NoiseSuppressor.isAvailable()) {
                 ns = NoiseSuppressor.create(sessionId)
                 ns?.enabled = true
             } else {
@@ -235,6 +330,8 @@ class MicrophoneInput(
 
 
     override fun close() {
+        apm?.close()
+        apm = null
         aec?.release()
         aec = null
         agc?.release()

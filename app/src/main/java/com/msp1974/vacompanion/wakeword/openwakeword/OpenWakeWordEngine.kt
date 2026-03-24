@@ -158,7 +158,7 @@ class OpenWakeWordEngine(
                     if (audio.isNotEmpty()) {
 
                         if (config.diagnosticsEnabled) {
-                            emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audio)))
+                            emit(AudioResult.AudioLevel(microphoneInput.currentRms))
                         }
 
                         // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer

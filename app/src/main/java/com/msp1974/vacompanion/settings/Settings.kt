@@ -428,7 +428,7 @@ class APPConfig(val context: Context) {
         const val DEFAULT_MIC_GAIN = 0
         const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 50
         const val DEFAULT_MIC_AUDIO_SOURCE = "voice_recognition"
-        const val DEFAULT_ECHO_CANCELLATION_MODE = "platform"
+        const val DEFAULT_ECHO_CANCELLATION_MODE = "hardware"
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
 
         @Volatile

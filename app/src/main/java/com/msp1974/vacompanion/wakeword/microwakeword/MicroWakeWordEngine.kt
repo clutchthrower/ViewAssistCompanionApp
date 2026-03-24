@@ -87,9 +87,7 @@ open class MicroWakeWordEngine (
                     val frameTimestamp = System.currentTimeMillis()
 
                     if (config.diagnosticsEnabled) {
-                        val audioByteString = ByteString.copyFrom(audio)
-                        audio.rewind()
-                        emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audioByteString.toByteArray())))
+                        emit(AudioResult.AudioLevel(microphoneInput.currentRms))
                     }
 
                     // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer
