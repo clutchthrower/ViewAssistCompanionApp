@@ -1,12 +1,36 @@
 package com.msp1974.vacompanion.utils
 
+import android.net.Uri
 import com.msp1974.vacompanion.settings.APPConfig
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AuthUtilsTest {
+    @After
+    fun tearDown() {
+        unmockkStatic(Uri::class)
+    }
+
+    private fun mockAuthResponseUri(
+        authority: String = AuthUtils.CLIENT_URL,
+        state: String? = null,
+        code: String? = null
+    ) {
+        val mockUri = mockk<Uri>()
+        every { mockUri.authority } returns authority
+        every { mockUri.getQueryParameter("state") } returns state
+        every { mockUri.getQueryParameter("code") } returns code
+
+        mockkStatic(Uri::class)
+        every { Uri.parse(any()) } returns mockUri
+    }
 
     @Test
     fun `getHAUrl builds fallback URL from IP and port`() {
@@ -41,5 +65,53 @@ class AuthUtilsTest {
         val result = AuthUtils.getHAUrl(config, withDashboardPath = false)
 
         assertEquals("https://ha.example.com", result)
+    }
+
+    @Test
+    fun `validateAuthResponse is true for matching client and state`() {
+        AuthUtils.state = "expected-state"
+        mockAuthResponseUri(state = "expected-state", code = "abc123")
+
+        val isValid = AuthUtils.validateAuthResponse(
+            "http://vaca.homeassistant?state=expected-state&code=abc123"
+        )
+
+        assertTrue(isValid)
+    }
+
+    @Test
+    fun `validateAuthResponse is false for mismatched state`() {
+        AuthUtils.state = "expected-state"
+        mockAuthResponseUri(state = "wrong-state", code = "abc123")
+
+        val isValid = AuthUtils.validateAuthResponse(
+            "http://vaca.homeassistant?state=wrong-state&code=abc123"
+        )
+
+        assertFalse(isValid)
+    }
+
+    @Test
+    fun `getReturnAuthCode returns code when response is valid`() {
+        AuthUtils.state = "expected-state"
+        mockAuthResponseUri(state = "expected-state", code = "abc123")
+
+        val code = AuthUtils.getReturnAuthCode(
+            "http://vaca.homeassistant?state=expected-state&code=abc123"
+        )
+
+        assertEquals("abc123", code)
+    }
+
+    @Test
+    fun `getReturnAuthCode returns empty string for invalid response`() {
+        AuthUtils.state = "expected-state"
+        mockAuthResponseUri(state = "wrong-state", code = "abc123")
+
+        val code = AuthUtils.getReturnAuthCode(
+            "http://vaca.homeassistant?state=wrong-state&code=abc123"
+        )
+
+        assertEquals("", code)
     }
 }
