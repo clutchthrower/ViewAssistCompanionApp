@@ -6,12 +6,6 @@ android {
     namespace = "com.viewassist.webrtc"
     compileSdk = 35
 
-    sourceSets {
-        getByName("main") {
-            jniLibs.srcDirs("src/main/libs")
-        }
-    }
-
     defaultConfig {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")

@@ -37,10 +37,16 @@ class MicrophoneInput(
     private val noiseSuppressionProvider: () -> Int = { 50 },
     /**
      * Echo cancellation mode:
-     * - "platform": use Android AcousticEchoCanceler
-     * - "software": use Speex echo suppression in-app
+     * - "hardware": use Android AcousticEchoCanceler
+     * - "webrtc": use WebRTC APM (AEC3/NS/AGC)
+     * - "speex": use Speex echo suppression in-app
      */
-    private val echoCancellationModeProvider: () -> String = { "platform" },
+    private val echoCancellationModeProvider: () -> String = { "hardware" },
+    /**
+     * Estimated render-to-capture path delay for WebRTC AEC, in milliseconds.
+     * Typical device values are around 30-120 ms.
+     */
+    private val webRtcStreamDelayMsProvider: () -> Int = { DEFAULT_WEBRTC_STREAM_DELAY_MS },
 ) : AutoCloseable {
     data class EchoDiagnostics(
         val requestedEchoMode: String,
@@ -130,7 +136,7 @@ class MicrophoneInput(
                 }
             }
 
-            val echoMode = echoCancellationModeProvider().lowercase()
+            val echoMode = normalizeEchoMode(echoCancellationModeProvider())
             val shouldRunSpeex = applySoftwareEffects && echoMode == "speex"
             val shouldRunWebRtc = applySoftwareEffects && echoMode == "webrtc" && apm != null
 
@@ -211,11 +217,10 @@ class MicrophoneInput(
 
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
-        val echoMode = echoCancellationModeProvider().lowercase()
+        val echoMode = normalizeEchoMode(echoCancellationModeProvider())
         val isHardwareMode = echoMode == "hardware"
         val isWebRtcMode = echoMode == "webrtc"
-        val isSoftwareMode = echoMode == "speex"
-        
+
         val requestedEchoMode = echoMode
         val platformAecAvailable = AcousticEchoCanceler.isAvailable()
         var platformAecEnabled = false
@@ -251,9 +256,11 @@ class MicrophoneInput(
                     vadEnabled = false
                 }
                 apm = com.viewassist.webrtc.WebRtcApm(config)
+                val delayMs = webRtcStreamDelayMsProvider().coerceIn(0, 500)
+                apm?.setStreamDelay(delayMs)
                 // Register static render sink so VoicePlayer can feed AEC far-end audio
                 updateRenderStreamSink { pcmBytes -> apm?.feedRenderAudioBytes(pcmBytes) }
-                Timber.d("$logTag: WebRTC APM initialized successfully")
+                Timber.d("$logTag: WebRTC APM initialized successfully (streamDelayMs=$delayMs)")
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
                 apm = null
@@ -345,6 +352,7 @@ class MicrophoneInput(
         val DEFAULT_CHANNEL_CONFIG = VacaAudioFormat.CHANNEL_IN_CONFIG
         val DEFAULT_AUDIO_FORMAT = VacaAudioFormat.ENCODING
         const val BUFFER_SIZE_IN_SHORTS = 1280
+        const val DEFAULT_WEBRTC_STREAM_DELAY_MS = 80
 
         fun mapAudioSource(source: String): Int = when (source.lowercase()) {
             "voice_communication" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
@@ -354,7 +362,7 @@ class MicrophoneInput(
 
         @Volatile
         private var _echoDiagnostics = EchoDiagnostics(
-            requestedEchoMode = "platform",
+            requestedEchoMode = "hardware",
             activeEchoMode = "none",
             platformAecAvailable = false,
             platformAecEnabled = false,
@@ -405,6 +413,15 @@ class MicrophoneInput(
                 platformAecAvailable = platformAecAvailable,
                 platformAecEnabled = platformAecEnabled,
             )
+        }
+
+        private fun normalizeEchoMode(mode: String): String {
+            return when (mode.lowercase()) {
+                // Backward compatibility for older persisted values.
+                "platform" -> "hardware"
+                "hardware", "webrtc", "speex" -> mode.lowercase()
+                else -> "hardware"
+            }
         }
     }
 }

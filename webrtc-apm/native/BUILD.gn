@@ -16,6 +16,8 @@ shared_library("webrtc_apms") {
   deps = [
     "//api:scoped_refptr",
     "//api/audio:audio_processing",
+    "//api/audio:builtin_audio_processing_builder",
+    "//api/environment:environment_factory",
     "//modules/audio_processing",
     "//modules/audio_processing:api",
   ]

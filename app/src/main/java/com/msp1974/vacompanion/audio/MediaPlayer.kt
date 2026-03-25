@@ -61,7 +61,7 @@ class MediaPlayer(val context: Context) {
             playRequested = true
 
             try {
-                val player = ExoPlayer.Builder(context).build()
+                val player = ApmTappedExoPlayerFactory.create(context)
                 mediaPlayer = player
 
                 val audioAttributes = androidx.media3.common.AudioAttributes.Builder()

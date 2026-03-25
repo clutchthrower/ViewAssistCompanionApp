@@ -16,6 +16,8 @@
 #include <algorithm>
 
 #include "api/audio/audio_processing.h"
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/environment/environment_factory.h"
 #include "api/scoped_refptr.h"
 #include "modules/audio_processing/include/audio_processing.h"
 
@@ -32,7 +34,7 @@ static constexpr int kFrameSize    = 160;  // 10 ms at 16 kHz
 // Per-instance context stored as a jlong handle on the Java side.
 // ---------------------------------------------------------------------------
 struct ApmContext {
-    rtc::scoped_refptr<webrtc::AudioProcessing> apm;
+    webrtc::scoped_refptr<webrtc::AudioProcessing> apm;
     webrtc::StreamConfig stream_config{kSampleRateHz, kNumChannels};
     bool vad_enabled  = false;
     bool last_vad     = false;
@@ -71,7 +73,8 @@ BuildConfig(jboolean aecEnabled,
     config.high_pass_filter.enabled       = hpfEnabled;
 
     config.echo_canceller.enabled         = aecEnabled;
-    config.echo_canceller.mobile_mode     = aecMobileMode;
+    // Newer WebRTC configs no longer expose a mobile_mode toggle.
+    (void)aecMobileMode;
 
     config.noise_suppression.enabled      = nsEnabled;
     config.noise_suppression.level        = MapNsLevel(nsLevel);
@@ -101,9 +104,8 @@ static jlong nativeCreate(JNIEnv* /*env*/, jclass /*clazz*/,
                               agc2Enabled, hpfEnabled,
                               transientSuppressionEnabled, vadEnabled);
 
-    auto apm = webrtc::AudioProcessingBuilder()
-                   .SetConfig(config)
-                   .Create();
+    auto apm = webrtc::BuiltinAudioProcessingBuilder(config)
+                   .Build(webrtc::CreateEnvironment());
     if (!apm) {
         LOGE("Failed to create AudioProcessing instance");
         return 0;

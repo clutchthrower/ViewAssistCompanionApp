@@ -1,103 +1,144 @@
 package com.msp1974.vacompanion.audio
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.MediaPlayer as AndroidMediaPlayer
-import android.net.Uri
+import android.os.Handler
+import androidx.core.net.toUri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
-import java.util.concurrent.Executors
-import kotlin.concurrent.thread
-import androidx.core.net.toUri
-
 
 class AlarmPlayer(val context: Context) {
     private val log = Logger()
     private val config: APPConfig = APPConfig.getInstance(context)
+    private val mainHandler = Handler(context.mainLooper)
 
     var isVolumeDucked: Boolean = false
     var isSounding: Boolean = false
-    var mediaPlayer: AndroidMediaPlayer? = null
+    var mediaPlayer: ExoPlayer? = null
     private var unduckThread: Thread? = null
+    private var stopTimeoutRunnable: Runnable? = null
 
     fun startAlarm(url: String = "") {
-        if (mediaPlayer == null) {
-            mediaPlayer = AndroidMediaPlayer().apply {
-                if (url != "") {
-                    setDataSource(url)
+        mainHandler.post {
+            if (mediaPlayer != null) return@post
+
+            try {
+                val player = ApmTappedExoPlayerFactory.create(context)
+                mediaPlayer = player
+
+                val mediaUri = if (url.isNotBlank()) {
+                    url.toUri()
                 } else {
-                    val mediaPath =
-                        ("android.resource://" + context.packageName + "/" + R.raw.alarm_sound).toUri()
-                    setDataSource(context, mediaPath)
+                    "android.resource://${context.packageName}/${R.raw.alarm_sound}".toUri()
                 }
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioStream.Alarm.USAGE)
-                        .build()
-                )
+
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioStream.Alarm.USAGE_EXO)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                player.setAudioAttributes(audioAttributes, true)
+                player.setMediaItem(MediaItem.fromUri(mediaUri))
+                player.repeatMode = Player.REPEAT_MODE_ONE
+                player.volume = getTargetVolume()
+                player.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        this@AlarmPlayer.isSounding = isPlaying
+                    }
+                })
+                player.prepare()
+                player.play()
+                isSounding = true
+                stopOnTimeout(10)
+            } catch (e: Exception) {
+                log.e("Failed to start alarm: ${e.message}")
+                try {
+                    mediaPlayer?.release()
+                } catch (_: Exception) {
+                }
+                mediaPlayer = null
+                isSounding = false
             }
-            mediaPlayer?.prepare()
-            mediaPlayer?.isLooping = true
-            mediaPlayer?.start()
-            isSounding = true
-            stopOnTimeout(10)
         }
     }
 
     fun stopAlarm() {
-        if (mediaPlayer != null && mediaPlayer!!.isPlaying) {
-            mediaPlayer!!.stop()
-            isSounding = false
-            mediaPlayer!!.reset()
-            mediaPlayer!!.release()
+        mainHandler.post {
+            stopTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            stopTimeoutRunnable = null
+
+            mediaPlayer?.let { player ->
+                try {
+                    player.stop()
+                } catch (_: Exception) {
+                }
+                player.release()
+            }
+            unduckThread?.interrupt()
+            unduckThread = null
             mediaPlayer = null
+            isSounding = false
         }
     }
 
-
     fun stopOnTimeout(timeout: Long) {
-        val executor = Executors.newSingleThreadScheduledExecutor()
-        executor.schedule({
-            stopAlarm()
-        }, timeout, java.util.concurrent.TimeUnit.MINUTES)
+        mainHandler.post {
+            stopTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            stopTimeoutRunnable = Runnable { stopAlarm() }
+            mainHandler.postDelayed(stopTimeoutRunnable!!, timeout * 60_000L)
+        }
     }
 
     fun duckVolume() {
-        synchronized(this) {
-            if (mediaPlayer != null && !isVolumeDucked) {
-                if (mediaPlayer!!.isPlaying) {
-                    val reduction = config.duckingVolume / 100.0f
-                    val vStart = 1.0f // Alarm baseline is 1.0
-                    val vTarget = (1.0f - reduction)
-                    
-                    log.d("Ducking Alarm volume to $vTarget (Animating)")
+        mainHandler.post {
+            synchronized(this) {
+                if (isVolumeDucked) return@synchronized
+                isVolumeDucked = true
+
+                mediaPlayer?.let { player ->
+                    val startVol = player.volume
+                    val targetVol = getTargetVolume()
+
+                    log.d("Ducking Alarm volume to $targetVol (Animating)")
                     unduckThread?.interrupt()
-                    unduckThread = VolumeAnimator.animate(vStart, vTarget) { vol ->
-                        mediaPlayer?.setVolume(vol, vol)
+                    unduckThread = VolumeAnimator.animate(startVol, targetVol) { vol ->
+                        mediaPlayer?.volume = vol
                     }
-                    isVolumeDucked = true
                 }
             }
         }
     }
 
     fun unDuckVolume() {
-        synchronized(this) {
-            if (mediaPlayer != null && isVolumeDucked) {
+        mainHandler.post {
+            synchronized(this) {
+                if (!isVolumeDucked) return@post
                 isVolumeDucked = false
-                
-                val reduction = config.duckingVolume / 100.0f
-                val vStart = (1.0f - reduction)
-                val vTarget = 1.0f
-                
-                log.i("Restoring Alarm volume to $vTarget (Animating)")
-                unduckThread?.interrupt()
-                unduckThread = VolumeAnimator.animate(vStart, vTarget) { vol ->
-                    mediaPlayer?.setVolume(vol, vol)
+
+                mediaPlayer?.let { player ->
+                    val startVol = player.volume
+                    val targetVol = getTargetVolume()
+
+                    log.i("Restoring Alarm volume to $targetVol (Animating)")
+                    unduckThread?.interrupt()
+                    unduckThread = VolumeAnimator.animate(startVol, targetVol) { vol ->
+                        mediaPlayer?.volume = vol
+                    }
                 }
             }
+        }
+    }
+
+    private fun getTargetVolume(): Float {
+        return if (isVolumeDucked) {
+            1.0f - (config.duckingVolume / 100.0f)
+        } else {
+            1.0f
         }
     }
 }

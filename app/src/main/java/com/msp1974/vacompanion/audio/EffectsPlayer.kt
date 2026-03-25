@@ -22,7 +22,7 @@ internal class StreamVolumeManager(context: Context) {
     }
 
     fun setVolume(stream: Int, volume: Int) {
-        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream) ,volume).toInt(), 0)
+        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream), volume), 0)
     }
 
     fun getVolume(stream: Int): Float {
@@ -86,7 +86,7 @@ class EffectsPlayer(private val context: Context) {
     }
 
     private fun createPlayer(resId: Int): ExoPlayer {
-        val player = ExoPlayer.Builder(context).build()
+        val player = ApmTappedExoPlayerFactory.create(context)
         val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(AudioStream.Feedback.USAGE_EXO)

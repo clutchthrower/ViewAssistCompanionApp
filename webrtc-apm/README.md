@@ -81,29 +81,14 @@ native/build_webrtc.sh             — Build automation script
 
 ## Building the Native Library
 
-The `.so` files must be built from the official Google WebRTC source:
+See `native/README.build.md` for reproducible Docker and Linux build workflows.
+Prebuilt JNI binaries are committed under `src/main/jniLibs/` so consumers can use the module without rebuilding native code first.
+
+Quick start:
 
 ```bash
-# 1. Install depot_tools
-git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-export PATH=$PWD/depot_tools:$PATH
-
-# 2. Fetch WebRTC Android source (~20 GB)
-mkdir webrtc-checkout && cd webrtc-checkout
-fetch --nohooks webrtc_android
-gclient sync
-
-# 3. Build for all ABIs
 cd /path/to/ViewAssistCompanionApp/webrtc-apm
-WEBRTC_SRC=/path/to/webrtc-checkout/src ./native/build_webrtc.sh
-```
-
-The script builds for arm64-v8a, armeabi-v7a, and x86_64, then copies the stripped `.so` files into `src/main/libs/`.
-
-### Verify the build
-
-```bash
-llvm-readelf --dyn-syms src/main/libs/arm64-v8a/libwebrtc_apms.so | grep JNI_OnLoad
+./native/build_webrtc_docker.sh
 ```
 
 ## Attribution
