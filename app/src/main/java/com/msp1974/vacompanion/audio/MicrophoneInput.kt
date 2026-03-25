@@ -126,7 +126,7 @@ class MicrophoneInput(
             }
             val activePipelineNsEnabled = when (processingMode) {
                 "hardware" -> ns?.enabled == true
-                "webrtc" -> apm != null
+                "webrtc" -> apm != null && noiseSuppressionProvider() > 0
                 "speex" -> noiseSuppressionProvider() > 0
                 else -> false
             }
@@ -252,6 +252,7 @@ class MicrophoneInput(
         val processingMode = normalizeInputProcessingMode(audioInputProcessingModeProvider())
         val isHardwareMode = shouldUseHardwarePlatformEffects(processingMode)
         val isWebRtcMode = processingMode == "webrtc"
+        val webRtcNsConfig = mapWebRtcNoiseSuppression(noiseSuppressionProvider())
 
         // Prevent stale platform effects from previous sessions from causing double processing.
         releasePlatformAudioEffects()
@@ -282,8 +283,8 @@ class MicrophoneInput(
             try {
                 val config = com.viewassist.webrtc.WebRtcApm.Config().apply {
                     aecEnabled = true
-                    nsEnabled = true
-                    nsLevel = com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH
+                    nsEnabled = webRtcNsConfig.enabled
+                    nsLevel = webRtcNsConfig.level
                     agcEnabled = true           // AGC2 adaptive digital
                     hpfEnabled = true           // DC offset / rumble removal
                     transientSuppressionEnabled = true  // Keyboard clicks / taps
@@ -297,7 +298,11 @@ class MicrophoneInput(
                 setCurrentWebRtcStreamDelayMs(configuredDelayMs)
                 // Register static render sink so VoicePlayer can feed AEC far-end audio
                 updateRenderStreamSink { pcmBytes -> apm?.feedRenderAudioBytes(pcmBytes) }
-                Timber.d("$logTag: WebRTC APM initialized successfully (streamDelayMs=$configuredDelayMs)")
+                Timber.d(
+                    "$logTag: WebRTC APM initialized successfully " +
+                        "(streamDelayMs=$configuredDelayMs, " +
+                        "nsEnabled=${webRtcNsConfig.enabled}, nsLevel=${webRtcNsConfig.level})"
+                )
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
                 apm = null
@@ -350,7 +355,7 @@ class MicrophoneInput(
             },
             activePipelineNsEnabled = when (configuredInputProcessingMode) {
                 "hardware" -> ns?.enabled == true
-                "webrtc" -> apm != null
+                "webrtc" -> apm != null && webRtcNsConfig.enabled
                 "speex" -> noiseSuppressionProvider() > 0
                 else -> false
             },
@@ -613,6 +618,28 @@ class MicrophoneInput(
 
         internal fun shouldEnableWebRtcRenderTap(mode: String): Boolean =
             normalizeInputProcessingMode(mode) == "webrtc"
+
+        private data class WebRtcNsConfig(
+            val enabled: Boolean,
+            val level: com.viewassist.webrtc.WebRtcApm.NsLevel,
+        )
+
+        private fun mapWebRtcNoiseSuppression(level: Int): WebRtcNsConfig {
+            val normalized = level.coerceIn(0, 100)
+            if (normalized == 0) {
+                return WebRtcNsConfig(
+                    enabled = false,
+                    level = com.viewassist.webrtc.WebRtcApm.NsLevel.LOW,
+                )
+            }
+            val nsLevel = when {
+                normalized <= 33 -> com.viewassist.webrtc.WebRtcApm.NsLevel.LOW
+                normalized <= 66 -> com.viewassist.webrtc.WebRtcApm.NsLevel.MODERATE
+                normalized <= 85 -> com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH
+                else -> com.viewassist.webrtc.WebRtcApm.NsLevel.VERY_HIGH
+            }
+            return WebRtcNsConfig(enabled = true, level = nsLevel)
+        }
 
         internal fun estimateAdaptiveWebRtcStreamDelayMs(
             baseDelayMs: Int,
