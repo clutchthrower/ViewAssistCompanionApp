@@ -1,14 +1,15 @@
 package com.msp1974.vacompanion.wakeword.microwakeword.microwakeword
 
 import com.example.microfeatures.MicroFrontend
+import com.msp1974.vacompanion.audio.VacaAudioFormat
 import com.msp1974.vacompanion.utils.fillFrom
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import timber.log.Timber
 import java.nio.ByteBuffer
 
-private const val SAMPLES_PER_SECOND = 16000
-private const val SAMPLES_PER_CHUNK = 160  // 10ms
-private const val BYTES_PER_SAMPLE = 2  // 16-bit
+private const val SAMPLES_PER_SECOND = VacaAudioFormat.SAMPLE_RATE_HZ
+private const val SAMPLES_PER_CHUNK = VacaAudioFormat.FRAME_SIZE_10MS
+private const val BYTES_PER_SAMPLE = VacaAudioFormat.BYTES_PER_SAMPLE
 private const val BYTES_PER_CHUNK = SAMPLES_PER_CHUNK * BYTES_PER_SAMPLE
 
 class MicroWakeWordDetector(private val wakeWords: List<MicroWakeWord>) : AutoCloseable {

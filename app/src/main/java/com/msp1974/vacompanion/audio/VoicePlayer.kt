@@ -14,9 +14,9 @@ class VoicePlayer(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     
-    private var sampleRate = 22050
-    private var channelCount = 1
-    private var bytesPerSample = 2
+    private var sampleRate = VacaAudioFormat.SAMPLE_RATE_HZ
+    private var channelCount = VacaAudioFormat.CHANNELS
+    private var bytesPerSample = VacaAudioFormat.BYTES_PER_SAMPLE
     private val frameSize = 480 // samples per channel
     private val bufferSize = frameSize * channelCount * bytesPerSample
     private val buffer = ByteArray(bufferSize)
@@ -99,6 +99,9 @@ class VoicePlayer(private val context: Context) {
     }
 
     fun writeAudio(buffer: ByteArray) {
+        // Feed render audio to WebRTC AEC before playing (provides echo reference).
+        // Uses the static sink set by MicrophoneInput when WebRTC mode is active.
+        MicrophoneInput.renderStreamSink?.invoke(buffer)
         this.audioTrack?.write(buffer, 0, buffer.size)
     }
 

@@ -78,6 +78,9 @@ class MicrophoneInput(
     val isRecording get() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
     val speex = SpeexProcessor(sampleRate = DEFAULT_SAMPLE_RATE_IN_HZ, frameSize = if (frameSize > 0) frameSize else bufferSize )
 
+    /** Expose the WebRTC APM instance for render stream feeding (AEC far-end reference). */
+    val webRtcApm: com.viewassist.webrtc.WebRtcApm? get() = apm
+
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
         if (audioRecord == null) {
@@ -237,33 +240,19 @@ class MicrophoneInput(
 
         if (isWebRtcMode) {
             try {
-                apm = com.viewassist.webrtc.WebRtcApm(
-                    /* aecExtendFilter = */ true,
-                    /* speechIntelligibilityEnhance = */ false, // Off: Alters speaker playback, interferes with AI AEC
-                    /* delayAgnostic = */ true,
-                    /* beamforming = */ false, // Off: We capture mono, no spatial array available
-                    /* nextGenerationAec = */ true,
-                    /* experimentalNs = */ true, // On: Enables Transient Noise Suppression (keyboard clicks/thumps)
-                    /* experimentalAgc = */ false // Off: Causes volume "pumping" which breaks neural wake-word models
-                )
-                // 1. High-Pass Filter (Remove rumble/DC offset first)
-                apm?.setHighPassFilter(true)
-                
-                // 2. Acoustic Echo Cancellation (Subtract speaker audio before any distortion)
-                apm?.setAecEnabled(true)
-                apm?.setAecClockDriftCompensation(false)
-                apm?.setAecSuppressionLevel(com.viewassist.webrtc.WebRtcApm.AecSuppressionLevel.MODERATE)
-
-                // 3. Noise Suppression (Remove background hiss/transients after echo is gone)
-                apm?.setNsEnabled(true)
-                apm?.setNsLevel(com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH)
-
-                // 4. Automatic Gain Control (Normalize the final cleaned volume last)
-                apm?.setAgcEnabled(true)
-                apm?.setAgcTargetLevelDbfs(3)
-                apm?.setAgcCompressionGainDb(90)
-                apm?.setAgcMode(com.viewassist.webrtc.WebRtcApm.AgcMode.ADAPTIVE_DIGITAL)
-                apm?.setAgcLimiterEnabled(true)
+                val config = com.viewassist.webrtc.WebRtcApm.Config().apply {
+                    aecEnabled = true
+                    aecMobileMode = true       // Mobile-optimised AEC3
+                    nsEnabled = true
+                    nsLevel = com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH
+                    agcEnabled = true           // AGC2 adaptive digital
+                    hpfEnabled = true           // DC offset / rumble removal
+                    transientSuppressionEnabled = true  // Keyboard clicks / taps
+                    vadEnabled = false
+                }
+                apm = com.viewassist.webrtc.WebRtcApm(config)
+                // Register static render sink so VoicePlayer can feed AEC far-end audio
+                updateRenderStreamSink { pcmBytes -> apm?.feedRenderAudioBytes(pcmBytes) }
                 Timber.d("$logTag: WebRTC APM initialized successfully")
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
@@ -330,6 +319,7 @@ class MicrophoneInput(
 
 
     override fun close() {
+        updateRenderStreamSink(null)
         apm?.close()
         apm = null
         aec?.release()
@@ -351,9 +341,9 @@ class MicrophoneInput(
 
     companion object {
         const val DEFAULT_AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_RECOGNITION
-        const val DEFAULT_SAMPLE_RATE_IN_HZ = 16000
-        const val DEFAULT_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
-        const val DEFAULT_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+        const val DEFAULT_SAMPLE_RATE_IN_HZ = VacaAudioFormat.SAMPLE_RATE_HZ
+        val DEFAULT_CHANNEL_CONFIG = VacaAudioFormat.CHANNEL_IN_CONFIG
+        val DEFAULT_AUDIO_FORMAT = VacaAudioFormat.ENCODING
         const val BUFFER_SIZE_IN_SHORTS = 1280
 
         fun mapAudioSource(source: String): Int = when (source.lowercase()) {
@@ -386,6 +376,21 @@ class MicrophoneInput(
         }
 
         fun getEchoDiagnostics(): EchoDiagnostics = _echoDiagnostics
+
+        /**
+         * Static render stream sink for WebRTC AEC.
+         * Set when a MicrophoneInput with WebRTC mode creates an APM,
+         * cleared when the MicrophoneInput is closed.
+         * VoicePlayer reads this to feed far-end audio to AEC3.
+         */
+        @Volatile
+        var renderStreamSink: ((ByteArray) -> Unit)? = null
+            private set
+
+        @Synchronized
+        internal fun updateRenderStreamSink(sink: ((ByteArray) -> Unit)?) {
+            renderStreamSink = sink
+        }
 
         @VisibleForTesting
         internal fun setEchoDiagnosticsForTesting(

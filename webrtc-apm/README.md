@@ -1,53 +1,54 @@
 # WebRTC Audio Processing Module for View Assist
 
-A standalone Android library that exposes the WebRTC Audio Processing Module (APM) via JNI, enabling high-quality audio processing without the full WebRTC networking stack.
+A standalone Android library that exposes the modern WebRTC Audio Processing Module (APM) via JNI, enabling high-quality audio processing with AEC3, RNN-based noise suppression, and AGC2.
 
-Forked from [brucekayle/webrtc-apm](https://github.com/brucekayle/webrtc-apm) and modernized for the [View Assist](https://github.com/dinki/View-Assist) project.
+Built from the latest [Google WebRTC](https://webrtc.org/) source, replacing the legacy M70-era fork.
 
 ## Features
 
-- **Acoustic Echo Cancellation (AEC)** — Removes speaker feedback from the microphone signal
-- **Noise Suppression (NS)** — Filters out background noise, including transient suppression (keyboard clicks, tapping)
-- **Automatic Gain Control (AGC)** — Normalizes microphone volume levels
-- **High-Pass Filter (HPF)** — Removes DC offset and low-frequency rumble
-- **Voice Activity Detection (VAD)** — Detects the presence of speech
+- **AEC3 Echo Cancellation** — Modern echo canceller (replaces legacy AEC), with mobile-optimised mode
+- **RNN Noise Suppression** — Deep-learning based, far superior to the old spectral NS
+- **AGC2 Gain Control** — Adaptive digital gain normalisation
+- **Transient Suppression** — Removes keyboard clicks, tapping, and other transient noise
+- **High-Pass Filter** — Removes DC offset and low-frequency rumble
+- **Voice Activity Detection** — Detects the presence of speech
 
 ## Audio Format
 
-- **Sample rate:** 16kHz
+- **Sample rate:** 16 kHz
 - **Bit depth:** 16-bit PCM
 - **Channels:** Mono
-- **Frame size:** 160 samples (10ms)
+- **Frame size:** 160 samples (10 ms)
 
 ## Usage
 
 ```kotlin
 import com.viewassist.webrtc.WebRtcApm
 
-val apm = WebRtcApm(
-    /* aecExtendFilter = */ true,
-    /* speechIntelligibility = */ false,
-    /* delayAgnostic = */ true,
-    /* beamforming = */ false,
-    /* nextGenAec = */ true,
-    /* experimentalNs = */ true,
-    /* experimentalAgc = */ false
-)
+// Create APM with config (all features enabled by default)
+val config = WebRtcApm.Config().apply {
+    aecEnabled = true
+    aecMobileMode = true
+    nsEnabled = true
+    nsLevel = WebRtcApm.NsLevel.HIGH
+    agcEnabled = true
+    hpfEnabled = true
+    transientSuppressionEnabled = true
+    vadEnabled = false
+}
+val apm = WebRtcApm(config)
 
-// Configure processing pipeline
-apm.setHighPassFilter(true)
-apm.setAecEnabled(true)
-apm.setAecSuppressionLevel(WebRtcApm.AecSuppressionLevel.MODERATE)
-apm.setNsEnabled(true)
-apm.setNsLevel(WebRtcApm.NsLevel.HIGH)
-apm.setAgcEnabled(true)
-apm.setAgcMode(WebRtcApm.AgcMode.ADAPTIVE_DIGITAL)
-apm.setAgcLimiterEnabled(true)
-
-// Process audio in 160-sample (10ms) frames
+// Process captured audio in 160-sample (10 ms) frames
 for (offset in 0 until buffer.size step 160) {
     apm.processCaptureStream(buffer, offset)
 }
+
+// Feed render (speaker) audio for AEC echo reference
+apm.feedRenderAudioBytes(speakerPcmBytes)
+
+// Reconfigure at runtime without recreating
+val newConfig = WebRtcApm.Config().apply { nsLevel = WebRtcApm.NsLevel.VERY_HIGH }
+apm.reconfigure(newConfig)
 
 // Clean up
 apm.close()
@@ -70,28 +71,46 @@ implementation("com.viewassist.webrtc:apm")
 ## Architecture
 
 ```text
-com.bk.webrtc.Apm          — Internal JNI bridge (must retain original package for .so compatibility)
-com.viewassist.webrtc.WebRtcApm  — Clean public API with Javadoc and AutoCloseable support
-libwebrtc_apms.so          — Precompiled native WebRTC APM (arm64-v8a, armeabi-v7a)
+com.viewassist.webrtc.NativeApm   — Package-private JNI bridge (RegisterNatives via JNI_OnLoad)
+com.viewassist.webrtc.WebRtcApm   — Public API with Config, feedRenderAudio, AutoCloseable
+libwebrtc_apms.so                  — Native library (arm64-v8a, armeabi-v7a, x86_64)
+native/apm_jni.cpp                 — C++ JNI source using AudioProcessingBuilder
+native/BUILD.gn                    — GN build target for WebRTC source tree
+native/build_webrtc.sh             — Build automation script
+```
+
+## Building the Native Library
+
+The `.so` files must be built from the official Google WebRTC source:
+
+```bash
+# 1. Install depot_tools
+git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+export PATH=$PWD/depot_tools:$PATH
+
+# 2. Fetch WebRTC Android source (~20 GB)
+mkdir webrtc-checkout && cd webrtc-checkout
+fetch --nohooks webrtc_android
+gclient sync
+
+# 3. Build for all ABIs
+cd /path/to/ViewAssistCompanionApp/webrtc-apm
+WEBRTC_SRC=/path/to/webrtc-checkout/src ./native/build_webrtc.sh
+```
+
+The script builds for arm64-v8a, armeabi-v7a, and x86_64, then copies the stripped `.so` files into `src/main/libs/`.
+
+### Verify the build
+
+```bash
+llvm-readelf --dyn-syms src/main/libs/arm64-v8a/libwebrtc_apms.so | grep JNI_OnLoad
 ```
 
 ## Attribution
 
-This project is a fork of [brucekayle/webrtc-apm](https://github.com/brucekayle/webrtc-apm), which provides a standalone JNI wrapper around the [Google WebRTC](https://webrtc.org/) Audio Processing Module.
-
-The original work by [BruceKayle](https://github.com/brucekayle) extracted the APM from the full WebRTC stack and created the native JNI bridge (`com.bk.webrtc.Apm`) and precompiled `.so` libraries that this project builds upon.
-
-### Changes from the original
-
-- Modernized build system (Gradle 8.14.3, AGP 8.13.2, compileSdk 35, Java 17)
-- Added clean public API wrapper (`com.viewassist.webrtc.WebRtcApm`) with full Javadoc and `AutoCloseable` support
-- Repackaged under `com.viewassist.webrtc` namespace
-- Removed demo application module
-- Integrated as a composite build for the View Assist Companion App
+Originally forked from [brucekayle/webrtc-apm](https://github.com/brucekayle/webrtc-apm). The native library has been completely rebuilt from the latest WebRTC source with a new JNI bridge targeting the modern `AudioProcessingBuilder` API.
 
 ## License
 
-The WebRTC source code is licensed by Google under a BSD-style license.  
+The WebRTC source code is licensed by Google under a BSD-style license.
 See [webrtc.org/license](https://webrtc.org/support/license) for details.
-
-The original JNI wrapper by [BruceKayle](https://github.com/brucekayle/webrtc-apm) is used under the terms of its original repository.

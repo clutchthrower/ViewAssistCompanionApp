@@ -11,6 +11,7 @@ import androidx.core.content.edit
 import com.google.android.gms.common.util.ClientLibraryUtils.getPackageInfo
 import com.google.firebase.Firebase
 import com.google.firebase.crashlytics.crashlytics
+import com.msp1974.vacompanion.audio.VacaAudioFormat
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventNotifier
 import com.msp1974.vacompanion.utils.Logger
@@ -66,9 +67,9 @@ class APPConfig(val context: Context) {
     var homeAssistantURL: String = ""
     var homeAssistantDashboard: String = ""
 
-    var sampleRate: Int = 16000
-    var audioChannels: Int = 1
-    var audioWidth: Int = 2
+    var sampleRate: Int = VacaAudioFormat.SAMPLE_RATE_HZ
+    var audioChannels: Int = VacaAudioFormat.CHANNELS
+    var audioWidth: Int = VacaAudioFormat.BYTES_PER_SAMPLE
 
     //var connectionCount: Int = 0
     var atomicConnectionCount: AtomicInteger = AtomicInteger(0)

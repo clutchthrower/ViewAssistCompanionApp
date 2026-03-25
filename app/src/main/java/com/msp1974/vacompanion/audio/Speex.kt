@@ -12,7 +12,7 @@ import kotlin.math.min
  * including noise suppression, echo cancellation, AGC, and VAD
  */
 class SpeexProcessor(
-    private val sampleRate: Int = 16000,
+    private val sampleRate: Int = VacaAudioFormat.SAMPLE_RATE_HZ,
     private val frameSize: Int = 320,
     private val filterLength: Int = 200
 ) {
@@ -348,7 +348,7 @@ private class VADState {
 class SpeexCodec(
     private val quality: Int = 8, // 0-10 (higher = better quality)
     private val complexity: Int = 3, // 1-10 (higher = slower)
-    private val sampleRate: Int = 16000
+    private val sampleRate: Int = VacaAudioFormat.SAMPLE_RATE_HZ
 ) {
     private val frameSize = when (sampleRate) {
         8000 -> 160

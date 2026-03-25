@@ -2,280 +2,261 @@ package com.viewassist.webrtc;
 
 import android.util.Log;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 /**
  * WebRTC Audio Processing Module wrapper for View Assist.
  *
- * This is a clean public API that delegates to the native JNI bridge
- * in com.bk.webrtc.Apm. The native .so libraries have JNI function names
- * baked to the com.bk.webrtc package path, so the internal bridge class
- * must retain that package name. This wrapper provides a stable, modern
- * API surface under the com.viewassist.webrtc namespace.
+ * Uses the modern WebRTC {@code AudioProcessingBuilder} / {@code Config} API
+ * with AEC3, AGC2, RNN-based noise suppression, and transient suppression.
  *
  * Native library: libwebrtc_apms.so
- * Audio format: 16kHz, 16-bit PCM, Mono, 10ms frames (160 samples)
+ * Audio format:   16 kHz, 16-bit PCM, mono, 10 ms frames (160 samples).
  */
 public class WebRtcApm implements AutoCloseable {
 
     private static final String TAG = "WebRtcApm";
+    /** 10 ms at 16 kHz. Must match VacaAudioFormat.FRAME_SIZE_10MS in the app module. */
+    private static final int FRAME_SIZE = 160;
 
-    private final com.bk.webrtc.Apm delegate;
+    private long handle;
     private boolean closed = false;
 
-    // Re-export enums with clear names
-    public enum AecSuppressionLevel {
-        LOW, MODERATE, HIGH;
+    // Reusable buffers to avoid per-call allocations on the hot audio path
+    private short[] renderLeftover = new short[0];
+    private short[] renderMergeBuf = null;  // lazily allocated, reused across calls
+    private short[] byteConvertBuf = null;  // reused by feedRenderAudioBytes
 
-        com.bk.webrtc.Apm.AEC_SuppressionLevel toInternal() {
-            switch (this) {
-                case LOW: return com.bk.webrtc.Apm.AEC_SuppressionLevel.LowSuppression;
-                case MODERATE: return com.bk.webrtc.Apm.AEC_SuppressionLevel.ModerateSuppression;
-                case HIGH: return com.bk.webrtc.Apm.AEC_SuppressionLevel.HighSuppression;
-                default: return com.bk.webrtc.Apm.AEC_SuppressionLevel.ModerateSuppression;
-            }
-        }
-    }
+    // ── Noise Suppression Level ─────────────────────────────────────────────
 
     public enum NsLevel {
-        LOW, MODERATE, HIGH, VERY_HIGH;
+        LOW(0),
+        MODERATE(1),
+        HIGH(2),
+        VERY_HIGH(3);
 
-        com.bk.webrtc.Apm.NS_Level toInternal() {
-            switch (this) {
-                case LOW: return com.bk.webrtc.Apm.NS_Level.Low;
-                case MODERATE: return com.bk.webrtc.Apm.NS_Level.Moderate;
-                case HIGH: return com.bk.webrtc.Apm.NS_Level.High;
-                case VERY_HIGH: return com.bk.webrtc.Apm.NS_Level.VeryHigh;
-                default: return com.bk.webrtc.Apm.NS_Level.High;
-            }
-        }
+        final int value;
+        NsLevel(int value) { this.value = value; }
     }
 
-    public enum AgcMode {
-        ADAPTIVE_ANALOG, ADAPTIVE_DIGITAL, FIXED_DIGITAL;
+    // ── Configuration ───────────────────────────────────────────────────────
 
-        com.bk.webrtc.Apm.AGC_Mode toInternal() {
-            switch (this) {
-                case ADAPTIVE_ANALOG: return com.bk.webrtc.Apm.AGC_Mode.AdaptiveAnalog;
-                case ADAPTIVE_DIGITAL: return com.bk.webrtc.Apm.AGC_Mode.AdaptiveDigital;
-                case FIXED_DIGITAL: return com.bk.webrtc.Apm.AGC_Mode.FixedDigital;
-                default: return com.bk.webrtc.Apm.AGC_Mode.AdaptiveDigital;
-            }
-        }
+    public static class Config {
+        /** Enable AEC3 echo cancellation. */
+        public boolean aecEnabled = true;
+
+        /** Use mobile-optimised AEC (recommended for Android). */
+        public boolean aecMobileMode = true;
+
+        /** Enable RNN-based noise suppression. */
+        public boolean nsEnabled = true;
+
+        /** Noise suppression aggressiveness. */
+        public NsLevel nsLevel = NsLevel.HIGH;
+
+        /** Enable AGC2 adaptive digital gain control. */
+        public boolean agcEnabled = true;
+
+        /** Enable high-pass filter (removes DC offset and low-frequency rumble). */
+        public boolean hpfEnabled = true;
+
+        /** Enable transient suppressor (keyboard clicks, tapping). */
+        public boolean transientSuppressionEnabled = true;
+
+        /** Enable voice activity detection. */
+        public boolean vadEnabled = false;
     }
 
-    public enum AecmRoutingMode {
-        QUIET_EARPIECE_OR_HEADSET, EARPIECE, LOUD_EARPIECE, SPEAKERPHONE, LOUD_SPEAKERPHONE;
-
-        com.bk.webrtc.Apm.AECM_RoutingMode toInternal() {
-            switch (this) {
-                case QUIET_EARPIECE_OR_HEADSET: return com.bk.webrtc.Apm.AECM_RoutingMode.QuietEarpieceOrHeadset;
-                case EARPIECE: return com.bk.webrtc.Apm.AECM_RoutingMode.Earpiece;
-                case LOUD_EARPIECE: return com.bk.webrtc.Apm.AECM_RoutingMode.LoudEarpiece;
-                case SPEAKERPHONE: return com.bk.webrtc.Apm.AECM_RoutingMode.Speakerphone;
-                case LOUD_SPEAKERPHONE: return com.bk.webrtc.Apm.AECM_RoutingMode.LoudSpeakerphone;
-                default: return com.bk.webrtc.Apm.AECM_RoutingMode.Speakerphone;
-            }
-        }
-    }
-
-    public enum VadLikelihood {
-        VERY_LOW, LOW, MODERATE, HIGH;
-
-        com.bk.webrtc.Apm.VAD_Likelihood toInternal() {
-            switch (this) {
-                case VERY_LOW: return com.bk.webrtc.Apm.VAD_Likelihood.VeryLowLikelihood;
-                case LOW: return com.bk.webrtc.Apm.VAD_Likelihood.LowLikelihood;
-                case MODERATE: return com.bk.webrtc.Apm.VAD_Likelihood.ModerateLikelihood;
-                case HIGH: return com.bk.webrtc.Apm.VAD_Likelihood.HighLikelihood;
-                default: return com.bk.webrtc.Apm.VAD_Likelihood.ModerateLikelihood;
-            }
-        }
-    }
+    // ── Construction ────────────────────────────────────────────────────────
 
     /**
-     * Create a new WebRTC Audio Processing Module instance.
+     * Create a new WebRTC APM instance with the given configuration.
      *
-     * @param aecExtendFilter         Enable extended AEC filter for better tail-length handling
-     * @param speechIntelligibility    Enable speech intelligibility enhancement (modifies speaker output)
-     * @param delayAgnostic            Enable delay-agnostic AEC (tolerates unknown system delays)
-     * @param beamforming              Enable beamforming (requires multi-mic array, mono = false)
-     * @param nextGenAec              Enable next-generation AEC algorithm
-     * @param experimentalNs           Enable experimental NS with transient suppression
-     * @param experimentalAgc          Enable experimental AGC (may cause volume pumping)
      * @throws Exception if native APM creation fails
      */
-    public WebRtcApm(
-            boolean aecExtendFilter,
-            boolean speechIntelligibility,
-            boolean delayAgnostic,
-            boolean beamforming,
-            boolean nextGenAec,
-            boolean experimentalNs,
-            boolean experimentalAgc
-    ) throws Exception {
-        delegate = new com.bk.webrtc.Apm(
-                aecExtendFilter,
-                speechIntelligibility,
-                delayAgnostic,
-                beamforming,
-                nextGenAec,
-                experimentalNs,
-                experimentalAgc
+    public WebRtcApm(Config config) throws Exception {
+        handle = NativeApm.nativeCreate(
+                config.aecEnabled,
+                config.aecMobileMode,
+                config.nsEnabled,
+                config.nsLevel.value,
+                config.agcEnabled,
+                config.hpfEnabled,
+                config.transientSuppressionEnabled,
+                config.vadEnabled
         );
+        if (handle == 0) {
+            throw new Exception("Failed to create native WebRTC APM");
+        }
         Log.d(TAG, "WebRtcApm initialized successfully");
     }
 
-    // --- High-Pass Filter ---
-
-    /** Enable/disable the built-in high-pass filter (removes DC offset and low-frequency rumble). */
-    public int setHighPassFilter(boolean enable) {
-        return delegate.HighPassFilter(enable);
-    }
-
-    // --- Acoustic Echo Cancellation (Desktop/Full) ---
-
-    /** Enable/disable full AEC. */
-    public int setAecEnabled(boolean enable) {
-        return delegate.AEC(enable);
-    }
-
-    /** Set AEC suppression level. */
-    public int setAecSuppressionLevel(AecSuppressionLevel level) {
-        return delegate.AECSetSuppressionLevel(level.toInternal());
-    }
-
-    /** Enable/disable clock drift compensation for AEC. */
-    public int setAecClockDriftCompensation(boolean enable) {
-        return delegate.AECClockDriftCompensation(enable);
-    }
-
-    // --- Acoustic Echo Cancellation Mobile (Lightweight) ---
-
-    /** Enable/disable mobile AEC (lightweight, for embedded devices). */
-    public int setAecMobileEnabled(boolean enable) {
-        return delegate.AECM(enable);
-    }
-
-    /** Set mobile AEC routing mode / suppression level. */
-    public int setAecMobileRoutingMode(AecmRoutingMode mode) {
-        return delegate.AECMSetSuppressionLevel(mode.toInternal());
-    }
-
-    // --- Noise Suppression ---
-
-    /** Enable/disable noise suppression. */
-    public int setNsEnabled(boolean enable) {
-        return delegate.NS(enable);
-    }
-
-    /** Set noise suppression aggressiveness level. */
-    public int setNsLevel(NsLevel level) {
-        return delegate.NSSetLevel(level.toInternal());
-    }
-
-    // --- Automatic Gain Control ---
-
-    /** Enable/disable AGC. */
-    public int setAgcEnabled(boolean enable) {
-        return delegate.AGC(enable);
-    }
-
-    /** Set AGC mode (adaptive analog, adaptive digital, or fixed digital). */
-    public int setAgcMode(AgcMode mode) {
-        return delegate.AGCSetMode(mode.toInternal());
-    }
+    // ── Runtime Reconfiguration ─────────────────────────────────────────────
 
     /**
-     * Set target peak level in dBFs (decibels from digital full-scale).
-     * Uses positive convention: 3 means -3 dBFs. Range: [0, 31].
-     */
-    public int setAgcTargetLevelDbfs(int level) {
-        return delegate.AGCSetTargetLevelDbfs(level);
-    }
-
-    /**
-     * Set maximum compression gain in dB. Range: [0, 90].
-     * Higher = more compression. 0 = no compression.
-     */
-    public int setAgcCompressionGainDb(int gain) {
-        return delegate.AGCSetcompressionGainDb(gain);
-    }
-
-    /** Enable/disable hard limiter at the target level. */
-    public int setAgcLimiterEnabled(boolean enable) {
-        return delegate.AGCEnableLimiter(enable);
-    }
-
-    /** Set analog level limits for adaptive analog mode. Range: [0, 65535]. */
-    public int setAgcAnalogLevelLimits(int minimum, int maximum) {
-        return delegate.AGCSetAnalogLevelLimits(minimum, maximum);
-    }
-
-    /** Set current analog level before ProcessCaptureStream (for adaptive analog mode). */
-    public int setAgcStreamAnalogLevel(int level) {
-        return delegate.AGCSetStreamAnalogLevel(level);
-    }
-
-    /** Get recommended analog level after ProcessCaptureStream (for adaptive analog mode). */
-    public int getAgcStreamAnalogLevel() {
-        return delegate.AGCStreamAnalogLevel();
-    }
-
-    // --- Voice Activity Detection ---
-
-    /** Enable/disable VAD. */
-    public int setVadEnabled(boolean enable) {
-        return delegate.VAD(enable);
-    }
-
-    /** Set VAD likelihood threshold. */
-    public int setVadLikelihood(VadLikelihood likelihood) {
-        return delegate.VADSetLikeHood(likelihood.toInternal());
-    }
-
-    /** Check if the last processed frame contained voice. */
-    public boolean hasVoice() {
-        return delegate.VADHasVoice();
-    }
-
-    // --- Stream Processing ---
-
-    /**
-     * Process captured audio (near-end / microphone).
-     * Applies AEC, NS, AGC, HPF in-place on the buffer.
+     * Change APM settings at runtime without destroying and recreating.
      *
-     * @param samples  Audio samples (16-bit PCM, mono, 16kHz)
-     * @param offset   Offset into the array (must have 160 samples from offset)
+     * @return 0 on success
+     */
+    public int reconfigure(Config config) {
+        checkNotClosed();
+        return NativeApm.nativeReconfigure(
+                handle,
+                config.aecEnabled,
+                config.aecMobileMode,
+                config.nsEnabled,
+                config.nsLevel.value,
+                config.agcEnabled,
+                config.hpfEnabled,
+                config.transientSuppressionEnabled,
+                config.vadEnabled
+        );
+    }
+
+    // ── Stream Processing ───────────────────────────────────────────────────
+
+    /**
+     * Process captured audio (near-end / microphone) in-place.
+     * Applies AEC3, RNN NS, AGC2, HPF on the buffer.
+     *
+     * @param samples 16-bit PCM samples (mono, 16 kHz)
+     * @param offset  starting index; must have 160 samples from offset
      * @return 0 on success
      */
     public int processCaptureStream(short[] samples, int offset) {
-        return delegate.ProcessCaptureStream(samples, offset);
+        checkNotClosed();
+        return NativeApm.nativeProcessStream(handle, samples, offset);
     }
 
     /**
      * Process render audio (far-end / speaker output).
-     * Required for AEC to have an echo reference signal.
+     * Provides the echo reference signal for AEC3.
      *
-     * @param samples  Audio samples (16-bit PCM, mono, 16kHz)
-     * @param offset   Offset into the array (must have 160 samples from offset)
+     * @param samples 16-bit PCM samples (mono, 16 kHz)
+     * @param offset  starting index; must have 160 samples from offset
      * @return 0 on success
      */
     public int processRenderStream(short[] samples, int offset) {
-        return delegate.ProcessRenderStream(samples, offset);
+        checkNotClosed();
+        return NativeApm.nativeProcessReverseStream(handle, samples, offset);
     }
 
-    /** Set the estimated delay between render and capture streams in milliseconds. */
+    /**
+     * Feed render (far-end / speaker) audio of arbitrary length.
+     * Internally buffers and slices into 160-sample frames,
+     * calling {@link #processRenderStream} for each complete frame.
+     *
+     * Thread-safe relative to {@link #processCaptureStream} — WebRTC's
+     * ProcessStream and ProcessReverseStream use internal locking.
+     *
+     * @param samples 16-bit PCM samples (mono, 16 kHz)
+     * @param offset  starting index in the array
+     * @param length  number of samples to process
+     */
+    public synchronized void feedRenderAudio(short[] samples, int offset, int length) {
+        if (closed || handle == 0) return;
+
+        // Prepend any leftover samples from the previous call
+        int leftoverLen = renderLeftover.length;
+        int totalLen = leftoverLen + length;
+        short[] buf;
+        int bufOffset;
+
+        if (leftoverLen > 0) {
+            // Reuse merge buffer if large enough, otherwise grow it
+            if (renderMergeBuf == null || renderMergeBuf.length < totalLen) {
+                renderMergeBuf = new short[totalLen];
+            }
+            System.arraycopy(renderLeftover, 0, renderMergeBuf, 0, leftoverLen);
+            System.arraycopy(samples, offset, renderMergeBuf, leftoverLen, length);
+            buf = renderMergeBuf;
+            bufOffset = 0;
+        } else {
+            buf = samples;
+            bufOffset = offset;
+        }
+
+        // Process complete 160-sample frames
+        int pos = bufOffset;
+        int end = bufOffset + totalLen;
+        while (pos + FRAME_SIZE <= end) {
+            NativeApm.nativeProcessReverseStream(handle, buf, pos);
+            pos += FRAME_SIZE;
+        }
+
+        // Save any remaining samples for the next call
+        int remaining = end - pos;
+        if (remaining > 0) {
+            if (renderLeftover.length != remaining) {
+                renderLeftover = new short[remaining];
+            }
+            System.arraycopy(buf, pos, renderLeftover, 0, remaining);
+        } else if (renderLeftover.length != 0) {
+            renderLeftover = new short[0];
+        }
+    }
+
+    /**
+     * Convenience: feed render audio from a raw PCM byte array (little-endian).
+     * Converts bytes to shorts and delegates to {@link #feedRenderAudio(short[], int, int)}.
+     *
+     * @param pcmBytes raw PCM 16-bit LE byte data
+     */
+    public void feedRenderAudioBytes(byte[] pcmBytes) {
+        if (pcmBytes == null || pcmBytes.length < 2) return;
+        int numSamples = pcmBytes.length / 2;
+        // Reuse conversion buffer if large enough
+        if (byteConvertBuf == null || byteConvertBuf.length < numSamples) {
+            byteConvertBuf = new short[numSamples];
+        }
+        ByteBuffer.wrap(pcmBytes)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .asShortBuffer()
+                .get(byteConvertBuf, 0, numSamples);
+        feedRenderAudio(byteConvertBuf, 0, numSamples);
+    }
+
+    // ── Delay & VAD ─────────────────────────────────────────────────────────
+
+    /**
+     * Set the estimated delay between render and capture streams in milliseconds.
+     */
     public int setStreamDelay(int delayMs) {
-        return delegate.SetStreamDelay(delayMs);
+        checkNotClosed();
+        return NativeApm.nativeSetStreamDelay(handle, delayMs);
     }
 
-    // --- Lifecycle ---
+    /**
+     * Check if the last processed capture frame contained voice.
+     * Only meaningful if {@link Config#vadEnabled} is true.
+     */
+    public boolean hasVoice() {
+        checkNotClosed();
+        return NativeApm.nativeHasVoice(handle);
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
 
     @Override
     public void close() {
-        if (!closed) {
-            delegate.close();
+        if (!closed && handle != 0) {
+            NativeApm.nativeDestroy(handle);
+            handle = 0;
             closed = true;
             Log.d(TAG, "WebRtcApm closed");
+        }
+    }
+
+    @Override
+    protected void finalize() throws Throwable {
+        super.finalize();
+        close();
+    }
+
+    private void checkNotClosed() {
+        if (closed) {
+            throw new IllegalStateException("WebRtcApm is closed");
         }
     }
 }
