@@ -90,7 +90,15 @@ class SatelliteClientHandler(
                 server.releaseInputAudioStream()
             }
 
-            override fun onStartMediaPlayback() {
+            override fun onStartMediaPlayback(sampleRateHz: Int, channels: Int, bytesPerSample: Int) {
+                val resolvedRate = sampleRateHz.takeIf { it > 0 } ?: config.sampleRate
+                val resolvedChannels = channels.takeIf { it > 0 } ?: config.audioChannels
+                val resolvedBytes = bytesPerSample.takeIf { it > 0 } ?: config.audioWidth
+                mediaHandler.voicePlayer.configureAudioFormat(
+                    sampleRateHz = resolvedRate,
+                    channels = resolvedChannels,
+                    bytesPerSample = resolvedBytes,
+                )
                 mediaHandler.voicePlayer.play()
                 server.notifyAudioOutputPlaybackChanged(true)
             }

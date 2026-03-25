@@ -52,14 +52,14 @@ class MicrophoneInput(
     private val webRtcStreamDelayMsProvider: () -> Int = { DEFAULT_WEBRTC_STREAM_DELAY_MS },
 ) : AutoCloseable {
     data class InputProcessingDiagnostics(
-        val requestedInputProcessingMode: String,
-        val activeInputProcessingMode: String,
-        val platformAecAvailable: Boolean,
-        val platformAecEnabled: Boolean,
-        val effectiveAecEnabled: Boolean,
-        val effectiveAgcEnabled: Boolean,
-        val effectiveNsEnabled: Boolean,
-        val webRtcApmInitialized: Boolean,
+        val configuredInputProcessingMode: String,
+        val activeProcessingPipeline: String,
+        val hardwareAecAvailable: Boolean,
+        val hardwareAecEnabled: Boolean,
+        val activePipelineAecEnabled: Boolean,
+        val activePipelineAgcEnabled: Boolean,
+        val activePipelineNsEnabled: Boolean,
+        val webRtcApmReady: Boolean,
     )
 
     private val logTag = "MicrophoneInput"
@@ -112,19 +112,19 @@ class MicrophoneInput(
 
         if (!isRecording) {
             val processingMode = normalizeInputProcessingMode(audioInputProcessingModeProvider())
-            val effectiveAec = when (processingMode) {
+            val activePipelineAecEnabled = when (processingMode) {
                 "hardware" -> aec?.enabled == true
                 "webrtc" -> apm != null
                 "speex" -> true
                 else -> false
             }
-            val effectiveAgc = when (processingMode) {
+            val activePipelineAgcEnabled = when (processingMode) {
                 "hardware" -> agc?.enabled == true
                 "webrtc" -> apm != null
                 "speex" -> false
                 else -> false
             }
-            val effectiveNs = when (processingMode) {
+            val activePipelineNsEnabled = when (processingMode) {
                 "hardware" -> ns?.enabled == true
                 "webrtc" -> apm != null
                 "speex" -> noiseSuppressionProvider() > 0
@@ -132,7 +132,7 @@ class MicrophoneInput(
             }
             Timber.d(
                 "Starting microphone with mode=$processingMode, " +
-                    "AEC=$effectiveAec, AGC=$effectiveAgc, NS=$effectiveNs"
+                    "AEC=$activePipelineAecEnabled, AGC=$activePipelineAgcEnabled, NS=$activePipelineNsEnabled"
             )
             audioRecord?.startRecording()
         } else {
@@ -256,21 +256,21 @@ class MicrophoneInput(
         // Prevent stale platform effects from previous sessions from causing double processing.
         releasePlatformAudioEffects()
 
-        val requestedInputProcessingMode = processingMode
-        val platformAecAvailable = AcousticEchoCanceler.isAvailable()
-        var platformAecEnabled = false
-        var activeInputProcessingMode = if (isHardwareMode) "none" else requestedInputProcessingMode
+        val configuredInputProcessingMode = processingMode
+        val hardwareAecAvailable = AcousticEchoCanceler.isAvailable()
+        var hardwareAecEnabled = false
+        var activeProcessingPipeline = if (isHardwareMode) "none" else configuredInputProcessingMode
         
         try {
-            if (isHardwareMode && platformAecAvailable) {
+            if (isHardwareMode && hardwareAecAvailable) {
                 aec = AcousticEchoCanceler.create(sessionId)
                 aec?.enabled = true
-                platformAecEnabled = aec?.enabled == true
-                if (platformAecEnabled) {
-                    activeInputProcessingMode = "hardware"
+                hardwareAecEnabled = aec?.enabled == true
+                if (hardwareAecEnabled) {
+                    activeProcessingPipeline = "hardware"
                 }
             } else if (!isHardwareMode) {
-                disablePlatformAudioPreprocessing(sessionId, requestedInputProcessingMode)
+                disablePlatformAudioPreprocessing(sessionId, configuredInputProcessingMode)
             } else {
                 Timber.d("$logTag: AEC is not available on this device")
             }
@@ -301,7 +301,7 @@ class MicrophoneInput(
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
                 apm = null
-                activeInputProcessingMode = "none"
+                activeProcessingPipeline = "none"
             }
         }
 
@@ -312,7 +312,7 @@ class MicrophoneInput(
             } else if (isHardwareMode) {
                 Timber.d("$logTag: AGC is not available on this device")
             } else {
-                Timber.d("$logTag: Hardware AGC skipped in $requestedInputProcessingMode mode")
+                Timber.d("$logTag: Hardware AGC skipped in $configuredInputProcessingMode mode")
             }
         } catch (e: Exception) {
             Timber.w("$logTag: Failed to enable AGC: ${e.message}")
@@ -325,36 +325,36 @@ class MicrophoneInput(
             } else if (isHardwareMode) {
                 Timber.d("$logTag: NS is not available on this device")
             } else {
-                Timber.d("$logTag: Hardware NS skipped in $requestedInputProcessingMode mode")
+                Timber.d("$logTag: Hardware NS skipped in $configuredInputProcessingMode mode")
             }
         } catch (e: Exception) {
             Timber.w("$logTag: Failed to enable NS: ${e.message}")
         }
 
         updateInputProcessingDiagnostics(
-            requestedInputProcessingMode = requestedInputProcessingMode,
-            activeInputProcessingMode = activeInputProcessingMode,
-            platformAecAvailable = platformAecAvailable,
-            platformAecEnabled = platformAecEnabled,
-            effectiveAecEnabled = when (requestedInputProcessingMode) {
-                "hardware" -> platformAecEnabled
+            configuredInputProcessingMode = configuredInputProcessingMode,
+            activeProcessingPipeline = activeProcessingPipeline,
+            hardwareAecAvailable = hardwareAecAvailable,
+            hardwareAecEnabled = hardwareAecEnabled,
+            activePipelineAecEnabled = when (configuredInputProcessingMode) {
+                "hardware" -> hardwareAecEnabled
                 "webrtc" -> apm != null
                 "speex" -> true
                 else -> false
             },
-            effectiveAgcEnabled = when (requestedInputProcessingMode) {
+            activePipelineAgcEnabled = when (configuredInputProcessingMode) {
                 "hardware" -> agc?.enabled == true
                 "webrtc" -> apm != null
                 "speex" -> false
                 else -> false
             },
-            effectiveNsEnabled = when (requestedInputProcessingMode) {
+            activePipelineNsEnabled = when (configuredInputProcessingMode) {
                 "hardware" -> ns?.enabled == true
                 "webrtc" -> apm != null
                 "speex" -> noiseSuppressionProvider() > 0
                 else -> false
             },
-            webRtcApmInitialized = apm != null,
+            webRtcApmReady = apm != null,
         )
     }
 
@@ -471,14 +471,14 @@ class MicrophoneInput(
         }
         configureCommunicationAudioMode(enable = false)
         updateInputProcessingDiagnostics(
-            requestedInputProcessingMode = _inputProcessingDiagnostics.requestedInputProcessingMode,
-            activeInputProcessingMode = "none",
-            platformAecAvailable = _inputProcessingDiagnostics.platformAecAvailable,
-            platformAecEnabled = false,
-            effectiveAecEnabled = false,
-            effectiveAgcEnabled = false,
-            effectiveNsEnabled = false,
-            webRtcApmInitialized = false,
+            configuredInputProcessingMode = _inputProcessingDiagnostics.configuredInputProcessingMode,
+            activeProcessingPipeline = "none",
+            hardwareAecAvailable = _inputProcessingDiagnostics.hardwareAecAvailable,
+            hardwareAecEnabled = false,
+            activePipelineAecEnabled = false,
+            activePipelineAgcEnabled = false,
+            activePipelineNsEnabled = false,
+            webRtcApmReady = false,
         )
     }
 
@@ -503,36 +503,36 @@ class MicrophoneInput(
 
         @Volatile
         private var _inputProcessingDiagnostics = InputProcessingDiagnostics(
-            requestedInputProcessingMode = "hardware",
-            activeInputProcessingMode = "none",
-            platformAecAvailable = false,
-            platformAecEnabled = false,
-            effectiveAecEnabled = false,
-            effectiveAgcEnabled = false,
-            effectiveNsEnabled = false,
-            webRtcApmInitialized = false,
+            configuredInputProcessingMode = "hardware",
+            activeProcessingPipeline = "none",
+            hardwareAecAvailable = false,
+            hardwareAecEnabled = false,
+            activePipelineAecEnabled = false,
+            activePipelineAgcEnabled = false,
+            activePipelineNsEnabled = false,
+            webRtcApmReady = false,
         )
 
         @Synchronized
         private fun updateInputProcessingDiagnostics(
-            requestedInputProcessingMode: String,
-            activeInputProcessingMode: String,
-            platformAecAvailable: Boolean,
-            platformAecEnabled: Boolean,
-            effectiveAecEnabled: Boolean,
-            effectiveAgcEnabled: Boolean,
-            effectiveNsEnabled: Boolean,
-            webRtcApmInitialized: Boolean,
+            configuredInputProcessingMode: String,
+            activeProcessingPipeline: String,
+            hardwareAecAvailable: Boolean,
+            hardwareAecEnabled: Boolean,
+            activePipelineAecEnabled: Boolean,
+            activePipelineAgcEnabled: Boolean,
+            activePipelineNsEnabled: Boolean,
+            webRtcApmReady: Boolean,
         ) {
             _inputProcessingDiagnostics = InputProcessingDiagnostics(
-                requestedInputProcessingMode = requestedInputProcessingMode,
-                activeInputProcessingMode = activeInputProcessingMode,
-                platformAecAvailable = platformAecAvailable,
-                platformAecEnabled = platformAecEnabled,
-                effectiveAecEnabled = effectiveAecEnabled,
-                effectiveAgcEnabled = effectiveAgcEnabled,
-                effectiveNsEnabled = effectiveNsEnabled,
-                webRtcApmInitialized = webRtcApmInitialized,
+                configuredInputProcessingMode = configuredInputProcessingMode,
+                activeProcessingPipeline = activeProcessingPipeline,
+                hardwareAecAvailable = hardwareAecAvailable,
+                hardwareAecEnabled = hardwareAecEnabled,
+                activePipelineAecEnabled = activePipelineAecEnabled,
+                activePipelineAgcEnabled = activePipelineAgcEnabled,
+                activePipelineNsEnabled = activePipelineNsEnabled,
+                webRtcApmReady = webRtcApmReady,
             )
         }
 
@@ -575,24 +575,24 @@ class MicrophoneInput(
 
         @VisibleForTesting
         internal fun setInputProcessingDiagnosticsForTesting(
-            requestedInputProcessingMode: String,
-            activeInputProcessingMode: String,
-            platformAecAvailable: Boolean,
-            platformAecEnabled: Boolean,
-            effectiveAecEnabled: Boolean = false,
-            effectiveAgcEnabled: Boolean = false,
-            effectiveNsEnabled: Boolean = false,
-            webRtcApmInitialized: Boolean = false,
+            configuredInputProcessingMode: String,
+            activeProcessingPipeline: String,
+            hardwareAecAvailable: Boolean,
+            hardwareAecEnabled: Boolean,
+            activePipelineAecEnabled: Boolean = false,
+            activePipelineAgcEnabled: Boolean = false,
+            activePipelineNsEnabled: Boolean = false,
+            webRtcApmReady: Boolean = false,
         ) {
             updateInputProcessingDiagnostics(
-                requestedInputProcessingMode = requestedInputProcessingMode,
-                activeInputProcessingMode = activeInputProcessingMode,
-                platformAecAvailable = platformAecAvailable,
-                platformAecEnabled = platformAecEnabled,
-                effectiveAecEnabled = effectiveAecEnabled,
-                effectiveAgcEnabled = effectiveAgcEnabled,
-                effectiveNsEnabled = effectiveNsEnabled,
-                webRtcApmInitialized = webRtcApmInitialized,
+                configuredInputProcessingMode = configuredInputProcessingMode,
+                activeProcessingPipeline = activeProcessingPipeline,
+                hardwareAecAvailable = hardwareAecAvailable,
+                hardwareAecEnabled = hardwareAecEnabled,
+                activePipelineAecEnabled = activePipelineAecEnabled,
+                activePipelineAgcEnabled = activePipelineAgcEnabled,
+                activePipelineNsEnabled = activePipelineNsEnabled,
+                webRtcApmReady = webRtcApmReady,
             )
         }
 
@@ -610,6 +610,9 @@ class MicrophoneInput(
 
         internal fun shouldUseHardwarePlatformEffects(mode: String): Boolean =
             normalizeInputProcessingMode(mode) == "hardware"
+
+        internal fun shouldEnableWebRtcRenderTap(mode: String): Boolean =
+            normalizeInputProcessingMode(mode) == "webrtc"
 
         internal fun estimateAdaptiveWebRtcStreamDelayMs(
             baseDelayMs: Int,

@@ -19,7 +19,7 @@ class SatelliteVoiceSession(
         fun sendEvent(packet: WyomingPacket)
         fun onRequestAudioStream()
         fun onReleaseAudioStream()
-        fun onStartMediaPlayback()
+        fun onStartMediaPlayback(sampleRateHz: Int, channels: Int, bytesPerSample: Int)
         fun onWriteMediaChunk(payload: ByteArray)
         fun onStopMediaPlayback()
         fun onUpdateVolumeDucking(key: String, duck: Boolean)
@@ -125,7 +125,7 @@ class SatelliteVoiceSession(
             "voice-stopped" -> callback.setPipelineTimeout(15)
             "transcript" -> handleTranscript(packet)
             "synthesize" -> handleSynthesize(packet)
-            "audio-start" -> handleAudioStart()
+            "audio-start" -> handleAudioStart(packet)
             "audio-chunk" -> handleAudioChunk(packet)
             "audio-stop" -> handleAudioStop()
             "pipeline-ended" -> handlePipelineEnded(packet)
@@ -197,7 +197,10 @@ class SatelliteVoiceSession(
         callback.setPipelineTimeout(20)
     }
 
-    private fun handleAudioStart() {
+    private fun handleAudioStart(packet: WyomingPacket) {
+        val sampleRateHz = packet.getInt("rate", 0)
+        val channels = packet.getInt("channels", 0)
+        val bytesPerSample = packet.getInt("width", 0)
         synchronized(this) {
             if (status.stage != WyomingPipelineStage.AWAITING_TTS) {
                 log.d("Ignoring unexpected audio-start in stage ${status.stage} (Session $id)")
@@ -207,7 +210,7 @@ class SatelliteVoiceSession(
         }
         callback.cancelPipelineTimeout()
         callback.onUpdateVolumeDucking("all", true)
-        callback.onStartMediaPlayback()
+        callback.onStartMediaPlayback(sampleRateHz, channels, bytesPerSample)
     }
 
     private fun handleAudioChunk(packet: WyomingPacket) {

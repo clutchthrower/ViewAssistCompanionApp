@@ -7,10 +7,10 @@ import android.os.Handler
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.C.USAGE_NOTIFICATION
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.msp1974.vacompanion.settings.APPConfig
 import kotlin.math.min
 import timber.log.Timber
 
@@ -36,6 +36,7 @@ internal class StreamVolumeManager(context: Context) {
  */
 class EffectsPlayer(private val context: Context) {
     private val players = mutableMapOf<Int, ExoPlayer>()
+    private val config: APPConfig = APPConfig.getInstance(context)
 
     fun prepare(resId: Int) {
         if (players.containsKey(resId)) return
@@ -86,7 +87,13 @@ class EffectsPlayer(private val context: Context) {
     }
 
     private fun createPlayer(resId: Int): ExoPlayer {
-        val player = ApmTappedExoPlayerFactory.create(context)
+        val inputMode = config.audioInputProcessingMode
+        val enableRenderTap = MicrophoneInput.shouldEnableWebRtcRenderTap(inputMode)
+        Timber.d("Creating effects ExoPlayer (inputMode=$inputMode, renderTapEnabled=$enableRenderTap)")
+        val player = ApmTappedExoPlayerFactory.create(
+            context = context,
+            enableRenderTap = enableRenderTap,
+        )
         val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(AudioStream.Feedback.USAGE_EXO)

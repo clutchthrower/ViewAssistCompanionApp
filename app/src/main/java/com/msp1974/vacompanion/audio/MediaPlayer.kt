@@ -61,7 +61,13 @@ class MediaPlayer(val context: Context) {
             playRequested = true
 
             try {
-                val player = ApmTappedExoPlayerFactory.create(context)
+                val inputMode = config.audioInputProcessingMode
+                val enableRenderTap = MicrophoneInput.shouldEnableWebRtcRenderTap(inputMode)
+                Timber.d("Creating media ExoPlayer (inputMode=$inputMode, renderTapEnabled=$enableRenderTap)")
+                val player = ApmTappedExoPlayerFactory.create(
+                    context = context,
+                    enableRenderTap = enableRenderTap,
+                )
                 mediaPlayer = player
 
                 val audioAttributes = androidx.media3.common.AudioAttributes.Builder()

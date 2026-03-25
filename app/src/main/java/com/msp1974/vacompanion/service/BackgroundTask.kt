@@ -48,45 +48,45 @@ enum class AudioRouteOption { NONE, DETECT, PROCESS_NO_DETECT, STREAM}
 
 internal data class AudioInputDiagnosticsSnapshot(
     val micAudioSource: String,
-    val requestedInputProcessingMode: String,
-    val activeInputProcessingMode: String,
-    val platformAecAvailable: Boolean,
-    val platformAecEnabled: Boolean,
-    val effectiveAecEnabled: Boolean,
-    val effectiveAgcEnabled: Boolean,
-    val effectiveNsEnabled: Boolean,
-    val webRtcApmInitialized: Boolean,
+    val configuredInputProcessingMode: String,
+    val activeProcessingPipeline: String,
+    val hardwareAecAvailable: Boolean,
+    val hardwareAecEnabled: Boolean,
+    val activePipelineAecEnabled: Boolean,
+    val activePipelineAgcEnabled: Boolean,
+    val activePipelineNsEnabled: Boolean,
+    val webRtcApmReady: Boolean,
     val currentApmStreamDelayMs: Int?,
     val renderFeedAgeMs: Long?,
     val audioEngine: String,
     val audioEngineStarted: Boolean,
     val audioEngineMuted: Boolean,
     val audioStreamingToServer: Boolean,
-    val audioRoute: String,
-    val renderSinkActive: Boolean,
-    val audioOutputPlaying: Boolean,
+    val wakeWordAudioRoute: String,
+    val renderTapSinkActive: Boolean,
+    val outputPlaybackActive: Boolean,
 )
 
 internal fun buildAudioInputDiagnosticsSensors(snapshot: AudioInputDiagnosticsSnapshot): JsonObject =
     buildJsonObject {
         put("mic_audio_source", snapshot.micAudioSource)
-        put("requested_input_processing_mode", snapshot.requestedInputProcessingMode)
-        put("active_input_processing_mode", snapshot.activeInputProcessingMode)
-        put("platform_aec_available", snapshot.platformAecAvailable)
-        put("platform_aec_enabled", snapshot.platformAecEnabled)
-        put("effective_aec_enabled", snapshot.effectiveAecEnabled)
-        put("effective_agc_enabled", snapshot.effectiveAgcEnabled)
-        put("effective_ns_enabled", snapshot.effectiveNsEnabled)
-        put("webrtc_apm_initialized", snapshot.webRtcApmInitialized)
+        put("configured_input_processing_mode", snapshot.configuredInputProcessingMode)
+        put("active_processing_pipeline", snapshot.activeProcessingPipeline)
+        put("hardware_aec_available", snapshot.hardwareAecAvailable)
+        put("hardware_aec_enabled", snapshot.hardwareAecEnabled)
+        put("active_pipeline_aec_enabled", snapshot.activePipelineAecEnabled)
+        put("active_pipeline_agc_enabled", snapshot.activePipelineAgcEnabled)
+        put("active_pipeline_ns_enabled", snapshot.activePipelineNsEnabled)
+        put("webrtc_apm_ready", snapshot.webRtcApmReady)
         snapshot.currentApmStreamDelayMs?.let { put("current_apm_stream_delay_ms", it) }
         snapshot.renderFeedAgeMs?.let { put("render_feed_age_ms", it) }
         put("audio_engine", snapshot.audioEngine)
         put("audio_engine_started", snapshot.audioEngineStarted)
         put("audio_engine_muted", snapshot.audioEngineMuted)
         put("audio_streaming_to_server", snapshot.audioStreamingToServer)
-        put("audio_route", snapshot.audioRoute)
-        put("render_sink_active", snapshot.renderSinkActive)
-        put("audio_output_playing", snapshot.audioOutputPlaying)
+        put("wake_word_audio_route", snapshot.wakeWordAudioRoute)
+        put("render_tap_sink_active", snapshot.renderTapSinkActive)
+        put("output_playback_active", snapshot.outputPlaybackActive)
     }
 
 internal class BackgroundTaskController (private val context: Context): EventListener {
@@ -634,23 +634,23 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         val sensors = buildAudioInputDiagnosticsSensors(
             AudioInputDiagnosticsSnapshot(
                 micAudioSource = config.micAudioSource,
-                requestedInputProcessingMode = diagnostics.requestedInputProcessingMode,
-                activeInputProcessingMode = diagnostics.activeInputProcessingMode,
-                platformAecAvailable = diagnostics.platformAecAvailable,
-                platformAecEnabled = diagnostics.platformAecEnabled,
-                effectiveAecEnabled = diagnostics.effectiveAecEnabled,
-                effectiveAgcEnabled = diagnostics.effectiveAgcEnabled,
-                effectiveNsEnabled = diagnostics.effectiveNsEnabled,
-                webRtcApmInitialized = diagnostics.webRtcApmInitialized,
+                configuredInputProcessingMode = diagnostics.configuredInputProcessingMode,
+                activeProcessingPipeline = diagnostics.activeProcessingPipeline,
+                hardwareAecAvailable = diagnostics.hardwareAecAvailable,
+                hardwareAecEnabled = diagnostics.hardwareAecEnabled,
+                activePipelineAecEnabled = diagnostics.activePipelineAecEnabled,
+                activePipelineAgcEnabled = diagnostics.activePipelineAgcEnabled,
+                activePipelineNsEnabled = diagnostics.activePipelineNsEnabled,
+                webRtcApmReady = diagnostics.webRtcApmReady,
                 currentApmStreamDelayMs = currentApmStreamDelayMs,
                 renderFeedAgeMs = renderFeedAgeMs,
                 audioEngine = config.wakeWordEngine,
                 audioEngineStarted = engineStarted,
                 audioEngineMuted = wakeWordEngine?.isMuted() ?: config.micMuted,
                 audioStreamingToServer = wakeWordEngine?.isStreaming() ?: false,
-                audioRoute = audioRoute.name.lowercase(),
-                renderSinkActive = MicrophoneInput.renderStreamSink != null,
-                audioOutputPlaying = audioOutputPlaying,
+                wakeWordAudioRoute = audioRoute.name.lowercase(),
+                renderTapSinkActive = MicrophoneInput.renderStreamSink != null,
+                outputPlaybackActive = audioOutputPlaying,
             )
         )
         server.sendStatus(

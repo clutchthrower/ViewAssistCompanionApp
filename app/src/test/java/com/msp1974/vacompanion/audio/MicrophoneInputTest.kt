@@ -30,26 +30,26 @@ class MicrophoneInputTest {
     @Test
     fun `input processing diagnostics returns coherent snapshot`() {
         MicrophoneInput.setInputProcessingDiagnosticsForTesting(
-            requestedInputProcessingMode = "software",
-            activeInputProcessingMode = "software",
-            platformAecAvailable = true,
-            platformAecEnabled = false,
-            effectiveAecEnabled = true,
-            effectiveAgcEnabled = true,
-            effectiveNsEnabled = true,
-            webRtcApmInitialized = true,
+            configuredInputProcessingMode = "software",
+            activeProcessingPipeline = "software",
+            hardwareAecAvailable = true,
+            hardwareAecEnabled = false,
+            activePipelineAecEnabled = true,
+            activePipelineAgcEnabled = true,
+            activePipelineNsEnabled = true,
+            webRtcApmReady = true,
         )
 
         val snapshot = MicrophoneInput.getInputProcessingDiagnostics()
 
-        assertEquals("software", snapshot.requestedInputProcessingMode)
-        assertEquals("software", snapshot.activeInputProcessingMode)
-        assertTrue(snapshot.platformAecAvailable)
-        assertFalse(snapshot.platformAecEnabled)
-        assertTrue(snapshot.effectiveAecEnabled)
-        assertTrue(snapshot.effectiveAgcEnabled)
-        assertTrue(snapshot.effectiveNsEnabled)
-        assertTrue(snapshot.webRtcApmInitialized)
+        assertEquals("software", snapshot.configuredInputProcessingMode)
+        assertEquals("software", snapshot.activeProcessingPipeline)
+        assertTrue(snapshot.hardwareAecAvailable)
+        assertFalse(snapshot.hardwareAecEnabled)
+        assertTrue(snapshot.activePipelineAecEnabled)
+        assertTrue(snapshot.activePipelineAgcEnabled)
+        assertTrue(snapshot.activePipelineNsEnabled)
+        assertTrue(snapshot.webRtcApmReady)
     }
 
     @Test
@@ -125,6 +125,13 @@ class MicrophoneInputTest {
         assertTrue(MicrophoneInput.shouldUseHardwarePlatformEffects("hardware"))
         assertFalse(MicrophoneInput.shouldUseHardwarePlatformEffects("webrtc"))
         assertFalse(MicrophoneInput.shouldUseHardwarePlatformEffects("speex"))
+    }
+
+    @Test
+    fun `webrtc render tap is only enabled in webrtc mode`() {
+        assertFalse(MicrophoneInput.shouldEnableWebRtcRenderTap("hardware"))
+        assertTrue(MicrophoneInput.shouldEnableWebRtcRenderTap("webrtc"))
+        assertFalse(MicrophoneInput.shouldEnableWebRtcRenderTap("speex"))
     }
 
     @Test

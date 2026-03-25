@@ -6,7 +6,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Logger
 
 class VoicePlayer(private val context: Context) {
@@ -17,16 +16,35 @@ class VoicePlayer(private val context: Context) {
     private var sampleRate = VacaAudioFormat.SAMPLE_RATE_HZ
     private var channelCount = VacaAudioFormat.CHANNELS
     private var bytesPerSample = VacaAudioFormat.BYTES_PER_SAMPLE
-    private val frameSize = 480 // samples per channel
-    private val bufferSize = frameSize * channelCount * bytesPerSample
-    private val buffer = ByteArray(bufferSize)
     private var audioTrack: AudioTrack? = null
     @Volatile var isPlaying = false
-    private val config: APPConfig = APPConfig.getInstance(context)
+    private val tapResampler = RenderTapResampler().apply {
+        configure(sampleRate, channelCount, bytesPerSample)
+    }
+
+    @Synchronized
+    fun configureAudioFormat(
+        sampleRateHz: Int,
+        channels: Int,
+        bytesPerSample: Int,
+    ) {
+        if (sampleRateHz <= 0 || (channels != 1 && channels != 2) || bytesPerSample != 2) {
+            log.w(
+                "Ignoring unsupported voice format: " +
+                    "${sampleRateHz}Hz/${channels}ch/${bytesPerSample}B"
+            )
+            return
+        }
+        this.sampleRate = sampleRateHz
+        this.channelCount = channels
+        this.bytesPerSample = bytesPerSample
+        tapResampler.configure(sampleRate, channelCount, bytesPerSample)
+        log.d("Configured voice format: ${sampleRate}Hz/${channelCount}ch/${this.bytesPerSample}B")
+    }
 
     private fun createAudioTrack(): AudioTrack {
         val channels = if (channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
-        val bytesPerSample = if (bytesPerSample == 2) AudioFormat.ENCODING_PCM_16BIT else AudioFormat.ENCODING_PCM_8BIT
+        val encoding = if (bytesPerSample == 2) AudioFormat.ENCODING_PCM_16BIT else AudioFormat.ENCODING_PCM_8BIT
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(AudioStream.Voice.USAGE)
@@ -36,7 +54,7 @@ class VoicePlayer(private val context: Context) {
         val audioFormat = AudioFormat.Builder()
             .setSampleRate(sampleRate)
             .setChannelMask(channels)
-            .setEncoding(bytesPerSample)
+            .setEncoding(encoding)
             .build()
 
         return AudioTrack.Builder()
@@ -47,7 +65,7 @@ class VoicePlayer(private val context: Context) {
                 AudioTrack.getMinBufferSize(
                     sampleRate,
                     channels,
-                    bytesPerSample
+                    encoding
                 )
             )
             .build()
@@ -100,10 +118,10 @@ class VoicePlayer(private val context: Context) {
 
     fun writeAudio(buffer: ByteArray) {
         // Feed render audio to WebRTC AEC before playing (provides echo reference).
-        // Uses the static sink set by MicrophoneInput when WebRTC mode is active.
+        // Convert to 16kHz mono PCM16 for APM while preserving native speaker playback format.
         MicrophoneInput.renderStreamSink?.let { sink ->
             runCatching {
-                sink(buffer)
+                tapResampler.process(buffer)?.let { sink(it) }
             }.onFailure { error ->
                 // Never allow AEC render-tap failures to block audible playback.
                 log.w("Render tap feed failed: ${error.message}")
@@ -118,6 +136,7 @@ class VoicePlayer(private val context: Context) {
     fun stop(force: Boolean = false) {
         isPlaying = false
         abandonAudioFocus()
+        tapResampler.resetState()
         audioTrack?.let { track ->
             try {
                 if (force) {

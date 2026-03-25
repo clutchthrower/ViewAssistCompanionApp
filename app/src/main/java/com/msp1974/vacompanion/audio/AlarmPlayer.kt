@@ -28,7 +28,13 @@ class AlarmPlayer(val context: Context) {
             if (mediaPlayer != null) return@post
 
             try {
-                val player = ApmTappedExoPlayerFactory.create(context)
+                val inputMode = config.audioInputProcessingMode
+                val enableRenderTap = MicrophoneInput.shouldEnableWebRtcRenderTap(inputMode)
+                log.d("Creating alarm ExoPlayer (inputMode=$inputMode, renderTapEnabled=$enableRenderTap)")
+                val player = ApmTappedExoPlayerFactory.create(
+                    context = context,
+                    enableRenderTap = enableRenderTap,
+                )
                 mediaPlayer = player
 
                 val mediaUri = if (url.isNotBlank()) {
