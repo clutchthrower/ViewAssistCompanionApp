@@ -97,7 +97,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.serialization.json)
-    implementation("com.github.brucekayle:webrtc-apm:0.0.1")
+    implementation(project(":webrtc-apm"))
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.compose)
     implementation(libs.androidx.camera.lifecycle)

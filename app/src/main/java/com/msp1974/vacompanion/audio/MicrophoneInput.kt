@@ -58,7 +58,7 @@ class MicrophoneInput(
     private var agc: AutomaticGainControl? = null
     private var ns: NoiseSuppressor? = null
     private var previousAudioMode: Int? = null
-    private var apm: com.bk.webrtc.Apm? = null
+    private var apm: com.viewassist.webrtc.WebRtcApm? = null
 
     // High-Pass Filter State (approx 80Hz cutoff at 16kHz)
     private var hpfLastIn = 0f
@@ -149,7 +149,7 @@ class MicrophoneInput(
             val processedBuffer = if (shouldRunWebRtc) {
                 for (offset in 0 until readCount step 160) {
                     if (offset + 160 <= readCount) {
-                        apm?.ProcessCaptureStream(audioBuffer, offset)
+                        apm?.processCaptureStream(audioBuffer, offset)
                     }
                 }
                 audioBuffer.copyOfRange(0, readCount)
@@ -237,7 +237,7 @@ class MicrophoneInput(
 
         if (isWebRtcMode) {
             try {
-                apm = com.bk.webrtc.Apm(
+                apm = com.viewassist.webrtc.WebRtcApm(
                     /* aecExtendFilter = */ true,
                     /* speechIntelligibilityEnhance = */ false, // Off: Alters speaker playback, interferes with AI AEC
                     /* delayAgnostic = */ true,
@@ -247,23 +247,23 @@ class MicrophoneInput(
                     /* experimentalAgc = */ false // Off: Causes volume "pumping" which breaks neural wake-word models
                 )
                 // 1. High-Pass Filter (Remove rumble/DC offset first)
-                apm?.HighPassFilter(true)
+                apm?.setHighPassFilter(true)
                 
                 // 2. Acoustic Echo Cancellation (Subtract speaker audio before any distortion)
-                apm?.AEC(true)
-                apm?.AECClockDriftCompensation(false)
-                apm?.AECSetSuppressionLevel(com.bk.webrtc.Apm.AEC_SuppressionLevel.ModerateSuppression)
+                apm?.setAecEnabled(true)
+                apm?.setAecClockDriftCompensation(false)
+                apm?.setAecSuppressionLevel(com.viewassist.webrtc.WebRtcApm.AecSuppressionLevel.MODERATE)
 
                 // 3. Noise Suppression (Remove background hiss/transients after echo is gone)
-                apm?.NS(true)
-                apm?.NSSetLevel(com.bk.webrtc.Apm.NS_Level.High)
+                apm?.setNsEnabled(true)
+                apm?.setNsLevel(com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH)
 
                 // 4. Automatic Gain Control (Normalize the final cleaned volume last)
-                apm?.AGC(true)
-                apm?.AGCSetTargetLevelDbfs(3)
-                apm?.AGCSetcompressionGainDb(90)
-                apm?.AGCSetMode(com.bk.webrtc.Apm.AGC_Mode.AdaptiveDigital)
-                apm?.AGCEnableLimiter(true)
+                apm?.setAgcEnabled(true)
+                apm?.setAgcTargetLevelDbfs(3)
+                apm?.setAgcCompressionGainDb(90)
+                apm?.setAgcMode(com.viewassist.webrtc.WebRtcApm.AgcMode.ADAPTIVE_DIGITAL)
+                apm?.setAgcLimiterEnabled(true)
                 Timber.d("$logTag: WebRTC APM initialized successfully")
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
