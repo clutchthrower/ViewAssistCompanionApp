@@ -6,7 +6,7 @@ Built from the latest [Google WebRTC](https://webrtc.org/) source, replacing the
 
 ## Features
 
-- **AEC3 Echo Cancellation** — Modern echo canceller (replaces legacy AEC), with mobile-optimised mode
+- **AEC3 Echo Cancellation** — Modern echo canceller (replaces legacy AEC)
 - **RNN Noise Suppression** — Deep-learning based, far superior to the old spectral NS
 - **AGC2 Gain Control** — Adaptive digital gain normalisation
 - **Transient Suppression** — Removes keyboard clicks, tapping, and other transient noise
@@ -28,7 +28,6 @@ import com.viewassist.webrtc.WebRtcApm
 // Create APM with config (all features enabled by default)
 val config = WebRtcApm.Config().apply {
     aecEnabled = true
-    aecMobileMode = true
     nsEnabled = true
     nsLevel = WebRtcApm.NsLevel.HIGH
     agcEnabled = true

@@ -46,9 +46,6 @@ public class WebRtcApm implements AutoCloseable {
         /** Enable AEC3 echo cancellation. */
         public boolean aecEnabled = true;
 
-        /** Use mobile-optimised AEC (recommended for Android). */
-        public boolean aecMobileMode = true;
-
         /** Enable RNN-based noise suppression. */
         public boolean nsEnabled = true;
 
@@ -78,7 +75,6 @@ public class WebRtcApm implements AutoCloseable {
     public WebRtcApm(Config config) throws Exception {
         handle = NativeApm.nativeCreate(
                 config.aecEnabled,
-                config.aecMobileMode,
                 config.nsEnabled,
                 config.nsLevel.value,
                 config.agcEnabled,
@@ -104,7 +100,6 @@ public class WebRtcApm implements AutoCloseable {
         return NativeApm.nativeReconfigure(
                 handle,
                 config.aecEnabled,
-                config.aecMobileMode,
                 config.nsEnabled,
                 config.nsLevel.value,
                 config.agcEnabled,

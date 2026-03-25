@@ -164,7 +164,14 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
     
-    var echoCancellationMode: String by Delegates.observable(DEFAULT_ECHO_CANCELLATION_MODE) { property, oldValue, newValue ->
+    /**
+     * Selects the microphone input processing pipeline ("hardware", "webrtc", "speex").
+     *
+     * This setting exists because audio behavior varies by device age, Android version,
+     * and OEM audio stack implementation. Newer devices may perform better with WebRTC APM,
+     * while others can still be best with the platform hardware path.
+     */
+    var audioInputProcessingMode: String by Delegates.observable(DEFAULT_AUDIO_INPUT_PROCESSING_MODE) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -333,7 +340,15 @@ class APPConfig(val context: Context) {
         settings["ducking_volume"]?.asIntOrNull()?.let { duckingVolume = it }
         settings["mic_gain"]?.asIntOrNull()?.let { micGain = it }
         settings["mic_mute"]?.jsonPrimitive?.booleanOrNull?.let { micMuted = it }
-        settings["echo_cancellation_mode"]?.jsonPrimitive?.contentOrNull?.let { echoCancellationMode = it }
+        settings["audio_input_processing_mode"]?.jsonPrimitive?.contentOrNull?.let { audioInputProcessingMode = it }
+        if (!settings.containsKey("audio_input_processing_mode") &&
+            settings.containsKey("echo_cancellation_mode")
+        ) {
+            log.w(
+                "Received legacy setting key echo_cancellation_mode; expected " +
+                    "audio_input_processing_mode. Legacy key is ignored."
+            )
+        }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
         settings["screen_auto_brightness"]?.jsonPrimitive?.booleanOrNull?.let { screenAutoBrightness = it }
         settings["swipe_refresh"]?.jsonPrimitive?.booleanOrNull?.let { swipeRefresh = it }
@@ -395,7 +410,7 @@ class APPConfig(val context: Context) {
                 "duckingVolume" -> "ducking_volume"
                 "micGain" -> "mic_gain"
                 "micAudioSource" -> "mic_audio_source"
-                "echoCancellationMode" -> "echo_cancellation_mode"
+                "audioInputProcessingMode" -> "audio_input_processing_mode"
                 "doNotDisturb" -> "do_not_disturb"
                 else -> property.name
             }
@@ -429,7 +444,8 @@ class APPConfig(val context: Context) {
         const val DEFAULT_MIC_GAIN = 0
         const val DEFAULT_NOISE_SUPPRESSION_LEVEL = 50
         const val DEFAULT_MIC_AUDIO_SOURCE = "voice_recognition"
-        const val DEFAULT_ECHO_CANCELLATION_MODE = "hardware"
+        // Conservative default; remote configuration can switch to WebRTC/Speex per device behavior.
+        const val DEFAULT_AUDIO_INPUT_PROCESSING_MODE = "hardware"
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
 
         @Volatile

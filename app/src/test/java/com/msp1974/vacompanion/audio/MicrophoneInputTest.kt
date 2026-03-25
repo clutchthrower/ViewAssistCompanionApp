@@ -3,6 +3,7 @@ package com.msp1974.vacompanion.audio
 import android.media.MediaRecorder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,19 +28,114 @@ class MicrophoneInputTest {
     }
 
     @Test
-    fun `echo diagnostics returns coherent snapshot`() {
-        MicrophoneInput.setEchoDiagnosticsForTesting(
-            requestedEchoMode = "software",
-            activeEchoMode = "software",
+    fun `input processing diagnostics returns coherent snapshot`() {
+        MicrophoneInput.setInputProcessingDiagnosticsForTesting(
+            requestedInputProcessingMode = "software",
+            activeInputProcessingMode = "software",
             platformAecAvailable = true,
             platformAecEnabled = false,
+            effectiveAecEnabled = true,
+            effectiveAgcEnabled = true,
+            effectiveNsEnabled = true,
+            webRtcApmInitialized = true,
         )
 
-        val snapshot = MicrophoneInput.getEchoDiagnostics()
+        val snapshot = MicrophoneInput.getInputProcessingDiagnostics()
 
-        assertEquals("software", snapshot.requestedEchoMode)
-        assertEquals("software", snapshot.activeEchoMode)
+        assertEquals("software", snapshot.requestedInputProcessingMode)
+        assertEquals("software", snapshot.activeInputProcessingMode)
         assertTrue(snapshot.platformAecAvailable)
         assertFalse(snapshot.platformAecEnabled)
+        assertTrue(snapshot.effectiveAecEnabled)
+        assertTrue(snapshot.effectiveAgcEnabled)
+        assertTrue(snapshot.effectiveNsEnabled)
+        assertTrue(snapshot.webRtcApmInitialized)
+    }
+
+    @Test
+    fun `adaptive delay falls back to baseline when render feed is stale`() {
+        val baseDelayMs = 80
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(0L)
+
+        val noRenderDelay = MicrophoneInput.estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs = baseDelayMs,
+            nowMs = 1_000L,
+        )
+
+        assertEquals(baseDelayMs, noRenderDelay)
+    }
+
+    @Test
+    fun `adaptive delay keeps baseline when render is recent`() {
+        val baseDelayMs = 80
+        val nowMs = 5_000L
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(nowMs - 40L)
+
+        val delay = MicrophoneInput.estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs = baseDelayMs,
+            nowMs = nowMs,
+        )
+
+        assertEquals(baseDelayMs, delay)
+    }
+
+    @Test
+    fun `adaptive delay uses plus 30 tier for mildly stale render`() {
+        val baseDelayMs = 80
+        val nowMs = 5_000L
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(nowMs - 200L)
+
+        val delay = MicrophoneInput.estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs = baseDelayMs,
+            nowMs = nowMs,
+        )
+
+        assertEquals(110, delay)
+    }
+
+    @Test
+    fun `adaptive delay uses plus 60 tier for stale render`() {
+        val baseDelayMs = 80
+        val nowMs = 5_000L
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(nowMs - 400L)
+
+        val delay = MicrophoneInput.estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs = baseDelayMs,
+            nowMs = nowMs,
+        )
+
+        assertEquals(140, delay)
+    }
+
+    @Test
+    fun `adaptive delay clamps to 500 upper bound`() {
+        val nowMs = 8_000L
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(nowMs - 400L)
+
+        val delay = MicrophoneInput.estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs = 470,
+            nowMs = nowMs,
+        )
+
+        assertEquals(500, delay)
+    }
+
+    @Test
+    fun `hardware platform effects are only used in hardware mode`() {
+        assertTrue(MicrophoneInput.shouldUseHardwarePlatformEffects("hardware"))
+        assertFalse(MicrophoneInput.shouldUseHardwarePlatformEffects("webrtc"))
+        assertFalse(MicrophoneInput.shouldUseHardwarePlatformEffects("speex"))
+    }
+
+    @Test
+    fun `render feed age is null when no render feed exists`() {
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(0L)
+        assertNull(MicrophoneInput.getRenderFeedAgeMs(nowMs = 10_000L))
+    }
+
+    @Test
+    fun `render feed age reports elapsed milliseconds`() {
+        MicrophoneInput.setLastRenderFeedTimestampForTesting(9_500L)
+        assertEquals(500L, MicrophoneInput.getRenderFeedAgeMs(nowMs = 10_000L))
     }
 }

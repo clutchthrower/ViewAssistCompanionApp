@@ -90,7 +90,10 @@ class SatelliteClientHandler(
                 server.releaseInputAudioStream()
             }
 
-            override fun onStartMediaPlayback() = mediaHandler.voicePlayer.play()
+            override fun onStartMediaPlayback() {
+                mediaHandler.voicePlayer.play()
+                server.notifyAudioOutputPlaybackChanged(true)
+            }
             
             override fun onWriteMediaChunk(payload: ByteArray) {
                 if (mediaHandler.voicePlayer.isPlaying) {
@@ -98,7 +101,10 @@ class SatelliteClientHandler(
                 }
             }
 
-            override fun onStopMediaPlayback() = mediaHandler.voicePlayer.stop(force = true)
+            override fun onStopMediaPlayback() {
+                mediaHandler.voicePlayer.stop(force = true)
+                server.notifyAudioOutputPlaybackChanged(false)
+            }
 
             override fun onUpdateVolumeDucking(key: String, duck: Boolean) = mediaHandler.updateVolumeDucking(key, duck)
 
@@ -260,6 +266,7 @@ class SatelliteClientHandler(
 
     private fun cleanupResources() {
         mediaHandler.release()
+        server.notifyAudioOutputPlaybackChanged(false)
         sendExecutor.shutdown()
         runCatching { sendExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) }
         broadcastExecutor.shutdown()

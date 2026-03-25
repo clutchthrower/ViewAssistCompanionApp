@@ -23,7 +23,6 @@ class NativeApm {
      * Create a new APM instance with the given configuration.
      *
      * @param aecEnabled                   enable AEC3 echo cancellation
-     * @param aecMobileMode                use mobile-optimised AEC (recommended for Android)
      * @param nsEnabled                    enable RNN-based noise suppression
      * @param nsLevel                      noise suppression level (0=Low, 1=Moderate, 2=High, 3=VeryHigh)
      * @param agc2Enabled                  enable AGC2 adaptive digital gain
@@ -34,7 +33,6 @@ class NativeApm {
      */
     static native long nativeCreate(
             boolean aecEnabled,
-            boolean aecMobileMode,
             boolean nsEnabled,
             int nsLevel,
             boolean agc2Enabled,
@@ -77,7 +75,6 @@ class NativeApm {
     static native int nativeReconfigure(
             long handle,
             boolean aecEnabled,
-            boolean aecMobileMode,
             boolean nsEnabled,
             int nsLevel,
             boolean agc2Enabled,

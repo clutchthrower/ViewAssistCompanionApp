@@ -146,7 +146,7 @@ class OpenWakeWordEngine(
                 frameSize = 1280,
                 gainProvider = { config.micGain },
                 noiseSuppressionProvider = { config.noiseSuppressionLevel },
-                echoCancellationModeProvider = { config.echoCancellationMode }
+                audioInputProcessingModeProvider = { config.audioInputProcessingMode }
             )
             try {
                 microphoneInput.start()

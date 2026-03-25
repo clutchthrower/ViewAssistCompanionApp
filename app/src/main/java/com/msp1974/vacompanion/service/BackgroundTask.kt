@@ -34,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -44,6 +45,49 @@ import kotlin.collections.set
 import kotlin.concurrent.thread
 
 enum class AudioRouteOption { NONE, DETECT, PROCESS_NO_DETECT, STREAM}
+
+internal data class AudioInputDiagnosticsSnapshot(
+    val micAudioSource: String,
+    val requestedInputProcessingMode: String,
+    val activeInputProcessingMode: String,
+    val platformAecAvailable: Boolean,
+    val platformAecEnabled: Boolean,
+    val effectiveAecEnabled: Boolean,
+    val effectiveAgcEnabled: Boolean,
+    val effectiveNsEnabled: Boolean,
+    val webRtcApmInitialized: Boolean,
+    val currentApmStreamDelayMs: Int?,
+    val renderFeedAgeMs: Long?,
+    val audioEngine: String,
+    val audioEngineStarted: Boolean,
+    val audioEngineMuted: Boolean,
+    val audioStreamingToServer: Boolean,
+    val audioRoute: String,
+    val renderSinkActive: Boolean,
+    val audioOutputPlaying: Boolean,
+)
+
+internal fun buildAudioInputDiagnosticsSensors(snapshot: AudioInputDiagnosticsSnapshot): JsonObject =
+    buildJsonObject {
+        put("mic_audio_source", snapshot.micAudioSource)
+        put("requested_input_processing_mode", snapshot.requestedInputProcessingMode)
+        put("active_input_processing_mode", snapshot.activeInputProcessingMode)
+        put("platform_aec_available", snapshot.platformAecAvailable)
+        put("platform_aec_enabled", snapshot.platformAecEnabled)
+        put("effective_aec_enabled", snapshot.effectiveAecEnabled)
+        put("effective_agc_enabled", snapshot.effectiveAgcEnabled)
+        put("effective_ns_enabled", snapshot.effectiveNsEnabled)
+        put("webrtc_apm_initialized", snapshot.webRtcApmInitialized)
+        snapshot.currentApmStreamDelayMs?.let { put("current_apm_stream_delay_ms", it) }
+        snapshot.renderFeedAgeMs?.let { put("render_feed_age_ms", it) }
+        put("audio_engine", snapshot.audioEngine)
+        put("audio_engine_started", snapshot.audioEngineStarted)
+        put("audio_engine_muted", snapshot.audioEngineMuted)
+        put("audio_streaming_to_server", snapshot.audioStreamingToServer)
+        put("audio_route", snapshot.audioRoute)
+        put("render_sink_active", snapshot.renderSinkActive)
+        put("audio_output_playing", snapshot.audioOutputPlaying)
+    }
 
 internal class BackgroundTaskController (private val context: Context): EventListener {
 
@@ -85,6 +129,8 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     var engine: WakeWordEngine? = null
     var engineStarted: Boolean = false
     var audioRoute: AudioRouteOption = AudioRouteOption.NONE
+    @Volatile
+    private var audioOutputPlaying: Boolean = false
     private var sensorRunner: Sensors? = null
     lateinit var assetManager: AssetManager
     lateinit var server: SatelliteServer
@@ -116,6 +162,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
             override fun onSatelliteStopped() {
                 Timber.i("Background Task - Disconnection detected")
                 BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_STOPPED)
+                audioOutputPlaying = false
                 if (sensorRunner != null) {
                     sensorRunner!!.stop()
                     sensorRunner = null
@@ -144,6 +191,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
                 Timber.i("Streaming audio to server. Sent $sentChunks chunks from history (${sentChunks * msPerChunk}ms).")
                 engine?.setStreaming(true)
+                sendAudioInputDiagnosticsStatus()
             }
 
             override fun onReleaseInputAudioStream() {
@@ -155,6 +203,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     scope.launch {
                         delay(2000)
                         audioRoute = AudioRouteOption.DETECT
+                        sendAudioInputDiagnosticsStatus()
                     }
                 }
                 if (config.processingSound != "none") {
@@ -168,6 +217,12 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     }
                 }
                 engine?.setStreaming(false)
+                sendAudioInputDiagnosticsStatus()
+            }
+
+            override fun onAudioOutputPlaybackChanged(isPlaying: Boolean) {
+                audioOutputPlaying = isPlaying
+                sendAudioInputDiagnosticsStatus()
             }
         })
         deviceSyncManager = DeviceSyncManager(context, server)
@@ -213,6 +268,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                         }
                     }
                     sendDiagnostics(0f,0f)
+                    sendAudioInputDiagnosticsStatus()
                 } catch (e: Exception) {
                     Timber.e("Error setting muted: ${e.message.toString()}")
                 }
@@ -236,7 +292,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     }
                 }
             }
-            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "mic_audio_source", "echo_cancellation_mode" -> {
+            "wakeWord", "wakeWordThreshold", "wakeWordEngine", "mic_audio_source", "audio_input_processing_mode" -> {
                 scope.launch {
                     try {
                         if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -291,6 +347,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                 }
                 audioRoute = AudioRouteOption.DETECT
                 sendDiagnostics(0f, 0f)
+                sendAudioInputDiagnosticsStatus()
             }
             "screenSaver" -> {
                 server.sendSetting("screen_saver", event.newValue)
@@ -477,9 +534,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
                     is WakeWordEngineProvider.AudioResult.EngineStatus -> {
                         Timber.i("Engine status: ${it.status}")
                         engineStarted = it.status == "Started"
-                        if (engineStarted) {
-                            sendAudioInputDiagnosticsStatus()
-                        }
+                        sendAudioInputDiagnosticsStatus()
                     }
 
                 }
@@ -494,7 +549,9 @@ internal class BackgroundTaskController (private val context: Context): EventLis
         }
         engine = null
         engineStarted = false
+        audioRoute = AudioRouteOption.NONE
         sendDiagnostics(0f, 0f)
+        sendAudioInputDiagnosticsStatus()
         Timber.d("Wake word detection terminated")
     }
 
@@ -570,16 +627,37 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     }
 
     private fun sendAudioInputDiagnosticsStatus() {
-        val diagnostics = MicrophoneInput.getEchoDiagnostics()
+        val diagnostics = MicrophoneInput.getInputProcessingDiagnostics()
+        val wakeWordEngine = engine
+        val currentApmStreamDelayMs = MicrophoneInput.getCurrentWebRtcStreamDelayMs()
+        val renderFeedAgeMs = MicrophoneInput.getRenderFeedAgeMs()
+        val sensors = buildAudioInputDiagnosticsSensors(
+            AudioInputDiagnosticsSnapshot(
+                micAudioSource = config.micAudioSource,
+                requestedInputProcessingMode = diagnostics.requestedInputProcessingMode,
+                activeInputProcessingMode = diagnostics.activeInputProcessingMode,
+                platformAecAvailable = diagnostics.platformAecAvailable,
+                platformAecEnabled = diagnostics.platformAecEnabled,
+                effectiveAecEnabled = diagnostics.effectiveAecEnabled,
+                effectiveAgcEnabled = diagnostics.effectiveAgcEnabled,
+                effectiveNsEnabled = diagnostics.effectiveNsEnabled,
+                webRtcApmInitialized = diagnostics.webRtcApmInitialized,
+                currentApmStreamDelayMs = currentApmStreamDelayMs,
+                renderFeedAgeMs = renderFeedAgeMs,
+                audioEngine = config.wakeWordEngine,
+                audioEngineStarted = engineStarted,
+                audioEngineMuted = wakeWordEngine?.isMuted() ?: config.micMuted,
+                audioStreamingToServer = wakeWordEngine?.isStreaming() ?: false,
+                audioRoute = audioRoute.name.lowercase(),
+                renderSinkActive = MicrophoneInput.renderStreamSink != null,
+                audioOutputPlaying = audioOutputPlaying,
+            )
+        )
         server.sendStatus(
             buildJsonObject {
                 put("timestamp", Date().toString())
                 putJsonObject("sensors") {
-                    put("mic_audio_source", config.micAudioSource)
-                    put("requested_echo_mode", diagnostics.requestedEchoMode)
-                    put("active_echo_mode", diagnostics.activeEchoMode)
-                    put("platform_aec_available", diagnostics.platformAecAvailable)
-                    put("platform_aec_enabled", diagnostics.platformAecEnabled)
+                    sensors.forEach { (k, v) -> put(k, v) }
                 }
             }
         )

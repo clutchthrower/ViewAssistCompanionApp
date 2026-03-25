@@ -67,7 +67,7 @@ open class MicroWakeWordEngine (
                 audioSource = audioSource,
                 gainProvider = { config.micGain },
                 noiseSuppressionProvider = { config.noiseSuppressionLevel },
-                echoCancellationModeProvider = { config.echoCancellationMode }
+                audioInputProcessingModeProvider = { config.audioInputProcessingMode }
             )
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value

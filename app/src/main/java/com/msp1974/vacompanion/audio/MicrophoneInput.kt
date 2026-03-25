@@ -36,23 +36,30 @@ class MicrophoneInput(
      */
     private val noiseSuppressionProvider: () -> Int = { 50 },
     /**
-     * Echo cancellation mode:
-     * - "hardware": use Android AcousticEchoCanceler
-     * - "webrtc": use WebRTC APM (AEC3/NS/AGC)
-     * - "speex": use Speex echo suppression in-app
+     * Audio input processing mode:
+     * - "hardware": use Android AcousticEchoCanceler/AGC/NS
+     * - "webrtc": use WebRTC APM (AEC3/NS/AGC/HPF/TS)
+     * - "speex": use Speex processing in-app
+     *
+     * Keeping this configurable is intentional: the best pipeline can differ by device age,
+     * Android version, and OEM audio implementation quality.
      */
-    private val echoCancellationModeProvider: () -> String = { "hardware" },
+    private val audioInputProcessingModeProvider: () -> String = { "hardware" },
     /**
-     * Estimated render-to-capture path delay for WebRTC AEC, in milliseconds.
-     * Typical device values are around 30-120 ms.
+     * Baseline render-to-capture path delay for WebRTC AEC, in milliseconds.
+     * Runtime logic adapts this baseline based on recent render activity.
      */
     private val webRtcStreamDelayMsProvider: () -> Int = { DEFAULT_WEBRTC_STREAM_DELAY_MS },
 ) : AutoCloseable {
-    data class EchoDiagnostics(
-        val requestedEchoMode: String,
-        val activeEchoMode: String,
+    data class InputProcessingDiagnostics(
+        val requestedInputProcessingMode: String,
+        val activeInputProcessingMode: String,
         val platformAecAvailable: Boolean,
         val platformAecEnabled: Boolean,
+        val effectiveAecEnabled: Boolean,
+        val effectiveAgcEnabled: Boolean,
+        val effectiveNsEnabled: Boolean,
+        val webRtcApmInitialized: Boolean,
     )
 
     private val logTag = "MicrophoneInput"
@@ -65,6 +72,8 @@ class MicrophoneInput(
     private var ns: NoiseSuppressor? = null
     private var previousAudioMode: Int? = null
     private var apm: com.viewassist.webrtc.WebRtcApm? = null
+    private var lastAppliedWebRtcDelayMs: Int = DEFAULT_WEBRTC_STREAM_DELAY_MS
+    private var lastWebRtcDelayUpdateAtMs: Long = 0L
 
     // High-Pass Filter State (approx 80Hz cutoff at 16kHz)
     private var hpfLastIn = 0f
@@ -102,7 +111,29 @@ class MicrophoneInput(
         }
 
         if (!isRecording) {
-            Timber.d("Starting microphone with AEC=${aec != null}, AGC=${agc != null}, NS=${ns != null}")
+            val processingMode = normalizeInputProcessingMode(audioInputProcessingModeProvider())
+            val effectiveAec = when (processingMode) {
+                "hardware" -> aec?.enabled == true
+                "webrtc" -> apm != null
+                "speex" -> true
+                else -> false
+            }
+            val effectiveAgc = when (processingMode) {
+                "hardware" -> agc?.enabled == true
+                "webrtc" -> apm != null
+                "speex" -> false
+                else -> false
+            }
+            val effectiveNs = when (processingMode) {
+                "hardware" -> ns?.enabled == true
+                "webrtc" -> apm != null
+                "speex" -> noiseSuppressionProvider() > 0
+                else -> false
+            }
+            Timber.d(
+                "Starting microphone with mode=$processingMode, " +
+                    "AEC=$effectiveAec, AGC=$effectiveAgc, NS=$effectiveNs"
+            )
             audioRecord?.startRecording()
         } else {
             Timber.w("Microphone already started")
@@ -136,9 +167,9 @@ class MicrophoneInput(
                 }
             }
 
-            val echoMode = normalizeEchoMode(echoCancellationModeProvider())
-            val shouldRunSpeex = applySoftwareEffects && echoMode == "speex"
-            val shouldRunWebRtc = applySoftwareEffects && echoMode == "webrtc" && apm != null
+            val processingMode = normalizeInputProcessingMode(audioInputProcessingModeProvider())
+            val shouldRunSpeex = applySoftwareEffects && processingMode == "speex"
+            val shouldRunWebRtc = applySoftwareEffects && processingMode == "webrtc" && apm != null
 
             // 1. High-Pass Filter (Skip if WebRTC handles it internally)
             if (!shouldRunWebRtc) {
@@ -156,6 +187,7 @@ class MicrophoneInput(
 
             // 2. Main Processing Block (AEC and NS)
             val processedBuffer = if (shouldRunWebRtc) {
+                maybeUpdateWebRtcStreamDelay()
                 for (offset in 0 until readCount step 160) {
                     if (offset + 160 <= readCount) {
                         apm?.processCaptureStream(audioBuffer, offset)
@@ -217,14 +249,17 @@ class MicrophoneInput(
 
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
-        val echoMode = normalizeEchoMode(echoCancellationModeProvider())
-        val isHardwareMode = echoMode == "hardware"
-        val isWebRtcMode = echoMode == "webrtc"
+        val processingMode = normalizeInputProcessingMode(audioInputProcessingModeProvider())
+        val isHardwareMode = shouldUseHardwarePlatformEffects(processingMode)
+        val isWebRtcMode = processingMode == "webrtc"
 
-        val requestedEchoMode = echoMode
+        // Prevent stale platform effects from previous sessions from causing double processing.
+        releasePlatformAudioEffects()
+
+        val requestedInputProcessingMode = processingMode
         val platformAecAvailable = AcousticEchoCanceler.isAvailable()
         var platformAecEnabled = false
-        var activeEchoMode = if (isHardwareMode) "none" else requestedEchoMode
+        var activeInputProcessingMode = if (isHardwareMode) "none" else requestedInputProcessingMode
         
         try {
             if (isHardwareMode && platformAecAvailable) {
@@ -232,10 +267,10 @@ class MicrophoneInput(
                 aec?.enabled = true
                 platformAecEnabled = aec?.enabled == true
                 if (platformAecEnabled) {
-                    activeEchoMode = "hardware"
+                    activeInputProcessingMode = "hardware"
                 }
             } else if (!isHardwareMode) {
-                Timber.d("$logTag: Platform AEC disabled manually. Requested: $requestedEchoMode")
+                disablePlatformAudioPreprocessing(sessionId, requestedInputProcessingMode)
             } else {
                 Timber.d("$logTag: AEC is not available on this device")
             }
@@ -247,7 +282,6 @@ class MicrophoneInput(
             try {
                 val config = com.viewassist.webrtc.WebRtcApm.Config().apply {
                     aecEnabled = true
-                    aecMobileMode = true       // Mobile-optimised AEC3
                     nsEnabled = true
                     nsLevel = com.viewassist.webrtc.WebRtcApm.NsLevel.HIGH
                     agcEnabled = true           // AGC2 adaptive digital
@@ -256,15 +290,18 @@ class MicrophoneInput(
                     vadEnabled = false
                 }
                 apm = com.viewassist.webrtc.WebRtcApm(config)
-                val delayMs = webRtcStreamDelayMsProvider().coerceIn(0, 500)
-                apm?.setStreamDelay(delayMs)
+                val configuredDelayMs = webRtcStreamDelayMsProvider().coerceIn(0, 500)
+                lastAppliedWebRtcDelayMs = configuredDelayMs
+                lastWebRtcDelayUpdateAtMs = 0L
+                apm?.setStreamDelay(configuredDelayMs)
+                setCurrentWebRtcStreamDelayMs(configuredDelayMs)
                 // Register static render sink so VoicePlayer can feed AEC far-end audio
                 updateRenderStreamSink { pcmBytes -> apm?.feedRenderAudioBytes(pcmBytes) }
-                Timber.d("$logTag: WebRTC APM initialized successfully (streamDelayMs=$delayMs)")
+                Timber.d("$logTag: WebRTC APM initialized successfully (streamDelayMs=$configuredDelayMs)")
             } catch (e: Exception) {
                 Timber.e(e, "$logTag: Failed to initialize WebRTC APM")
                 apm = null
-                activeEchoMode = "none"
+                activeInputProcessingMode = "none"
             }
         }
 
@@ -272,8 +309,10 @@ class MicrophoneInput(
             if (isHardwareMode && AutomaticGainControl.isAvailable()) {
                 agc = AutomaticGainControl.create(sessionId)
                 agc?.enabled = true
-            } else {
+            } else if (isHardwareMode) {
                 Timber.d("$logTag: AGC is not available on this device")
+            } else {
+                Timber.d("$logTag: Hardware AGC skipped in $requestedInputProcessingMode mode")
             }
         } catch (e: Exception) {
             Timber.w("$logTag: Failed to enable AGC: ${e.message}")
@@ -283,18 +322,39 @@ class MicrophoneInput(
             if (isHardwareMode && NoiseSuppressor.isAvailable()) {
                 ns = NoiseSuppressor.create(sessionId)
                 ns?.enabled = true
-            } else {
+            } else if (isHardwareMode) {
                 Timber.d("$logTag: NS is not available on this device")
+            } else {
+                Timber.d("$logTag: Hardware NS skipped in $requestedInputProcessingMode mode")
             }
         } catch (e: Exception) {
             Timber.w("$logTag: Failed to enable NS: ${e.message}")
         }
 
-        updateEchoDiagnostics(
-            requestedEchoMode = requestedEchoMode,
-            activeEchoMode = activeEchoMode,
+        updateInputProcessingDiagnostics(
+            requestedInputProcessingMode = requestedInputProcessingMode,
+            activeInputProcessingMode = activeInputProcessingMode,
             platformAecAvailable = platformAecAvailable,
             platformAecEnabled = platformAecEnabled,
+            effectiveAecEnabled = when (requestedInputProcessingMode) {
+                "hardware" -> platformAecEnabled
+                "webrtc" -> apm != null
+                "speex" -> true
+                else -> false
+            },
+            effectiveAgcEnabled = when (requestedInputProcessingMode) {
+                "hardware" -> agc?.enabled == true
+                "webrtc" -> apm != null
+                "speex" -> false
+                else -> false
+            },
+            effectiveNsEnabled = when (requestedInputProcessingMode) {
+                "hardware" -> ns?.enabled == true
+                "webrtc" -> apm != null
+                "speex" -> noiseSuppressionProvider() > 0
+                else -> false
+            },
+            webRtcApmInitialized = apm != null,
         )
     }
 
@@ -324,17 +384,83 @@ class MicrophoneInput(
         }
     }
 
+    private fun maybeUpdateWebRtcStreamDelay() {
+        val now = System.currentTimeMillis()
+        if (now - lastWebRtcDelayUpdateAtMs < WEBRTC_DELAY_UPDATE_INTERVAL_MS) {
+            return
+        }
+        lastWebRtcDelayUpdateAtMs = now
 
-    override fun close() {
-        updateRenderStreamSink(null)
-        apm?.close()
-        apm = null
+        val baseDelayMs = webRtcStreamDelayMsProvider().coerceIn(0, 500)
+        val adaptiveDelayMs = estimateAdaptiveWebRtcStreamDelayMs(baseDelayMs, now)
+        if (adaptiveDelayMs != lastAppliedWebRtcDelayMs) {
+            val result = apm?.setStreamDelay(adaptiveDelayMs) ?: -1
+            if (result == 0) {
+                Timber.d(
+                    "$logTag: Updated WebRTC stream delay to $adaptiveDelayMs ms " +
+                        "(base=$baseDelayMs ms)"
+                )
+                lastAppliedWebRtcDelayMs = adaptiveDelayMs
+                setCurrentWebRtcStreamDelayMs(adaptiveDelayMs)
+            }
+        }
+    }
+
+    private fun releasePlatformAudioEffects() {
         aec?.release()
         aec = null
         agc?.release()
         agc = null
         ns?.release()
         ns = null
+    }
+
+    private fun disablePlatformAudioPreprocessing(sessionId: Int, mode: String) {
+        try {
+            val effect = AcousticEchoCanceler.create(sessionId)
+            if (effect == null) {
+                Timber.d("$logTag: Hardware AEC not present/attachable in $mode mode")
+            } else {
+                effect.enabled = false
+                effect.release()
+                Timber.d("$logTag: Hardware AEC disabled in $mode mode")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Unable to disable hardware AEC in $mode mode: ${e.message}")
+        }
+        try {
+            val effect = AutomaticGainControl.create(sessionId)
+            if (effect == null) {
+                Timber.d("$logTag: Hardware AGC not present/attachable in $mode mode")
+            } else {
+                effect.enabled = false
+                effect.release()
+                Timber.d("$logTag: Hardware AGC disabled in $mode mode")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Unable to disable hardware AGC in $mode mode: ${e.message}")
+        }
+        try {
+            val effect = NoiseSuppressor.create(sessionId)
+            if (effect == null) {
+                Timber.d("$logTag: Hardware NS not present/attachable in $mode mode")
+            } else {
+                effect.enabled = false
+                effect.release()
+                Timber.d("$logTag: Hardware NS disabled in $mode mode")
+            }
+        } catch (e: Exception) {
+            Timber.w("$logTag: Unable to disable hardware NS in $mode mode: ${e.message}")
+        }
+    }
+
+
+    override fun close() {
+        updateRenderStreamSink(null)
+        setCurrentWebRtcStreamDelayMs(null)
+        apm?.close()
+        apm = null
+        releasePlatformAudioEffects()
 
         audioRecord?.let {
             if (isRecording) {
@@ -344,6 +470,16 @@ class MicrophoneInput(
             audioRecord = null
         }
         configureCommunicationAudioMode(enable = false)
+        updateInputProcessingDiagnostics(
+            requestedInputProcessingMode = _inputProcessingDiagnostics.requestedInputProcessingMode,
+            activeInputProcessingMode = "none",
+            platformAecAvailable = _inputProcessingDiagnostics.platformAecAvailable,
+            platformAecEnabled = false,
+            effectiveAecEnabled = false,
+            effectiveAgcEnabled = false,
+            effectiveNsEnabled = false,
+            webRtcApmInitialized = false,
+        )
     }
 
     companion object {
@@ -353,6 +489,11 @@ class MicrophoneInput(
         val DEFAULT_AUDIO_FORMAT = VacaAudioFormat.ENCODING
         const val BUFFER_SIZE_IN_SHORTS = 1280
         const val DEFAULT_WEBRTC_STREAM_DELAY_MS = 80
+        private const val WEBRTC_DELAY_UPDATE_INTERVAL_MS = 500L
+        @Volatile
+        private var lastRenderFeedAtMs: Long = 0L
+        @Volatile
+        private var currentWebRtcStreamDelayMs: Int? = null
 
         fun mapAudioSource(source: String): Int = when (source.lowercase()) {
             "voice_communication" -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
@@ -361,29 +502,48 @@ class MicrophoneInput(
         }
 
         @Volatile
-        private var _echoDiagnostics = EchoDiagnostics(
-            requestedEchoMode = "hardware",
-            activeEchoMode = "none",
+        private var _inputProcessingDiagnostics = InputProcessingDiagnostics(
+            requestedInputProcessingMode = "hardware",
+            activeInputProcessingMode = "none",
             platformAecAvailable = false,
             platformAecEnabled = false,
+            effectiveAecEnabled = false,
+            effectiveAgcEnabled = false,
+            effectiveNsEnabled = false,
+            webRtcApmInitialized = false,
         )
 
         @Synchronized
-        private fun updateEchoDiagnostics(
-            requestedEchoMode: String,
-            activeEchoMode: String,
+        private fun updateInputProcessingDiagnostics(
+            requestedInputProcessingMode: String,
+            activeInputProcessingMode: String,
             platformAecAvailable: Boolean,
             platformAecEnabled: Boolean,
+            effectiveAecEnabled: Boolean,
+            effectiveAgcEnabled: Boolean,
+            effectiveNsEnabled: Boolean,
+            webRtcApmInitialized: Boolean,
         ) {
-            _echoDiagnostics = EchoDiagnostics(
-                requestedEchoMode = requestedEchoMode,
-                activeEchoMode = activeEchoMode,
+            _inputProcessingDiagnostics = InputProcessingDiagnostics(
+                requestedInputProcessingMode = requestedInputProcessingMode,
+                activeInputProcessingMode = activeInputProcessingMode,
                 platformAecAvailable = platformAecAvailable,
                 platformAecEnabled = platformAecEnabled,
+                effectiveAecEnabled = effectiveAecEnabled,
+                effectiveAgcEnabled = effectiveAgcEnabled,
+                effectiveNsEnabled = effectiveNsEnabled,
+                webRtcApmInitialized = webRtcApmInitialized,
             )
         }
 
-        fun getEchoDiagnostics(): EchoDiagnostics = _echoDiagnostics
+        fun getInputProcessingDiagnostics(): InputProcessingDiagnostics = _inputProcessingDiagnostics
+        fun getCurrentWebRtcStreamDelayMs(): Int? = currentWebRtcStreamDelayMs
+        fun getRenderFeedAgeMs(nowMs: Long = System.currentTimeMillis()): Long? {
+            if (lastRenderFeedAtMs == 0L) {
+                return null
+            }
+            return (nowMs - lastRenderFeedAtMs).coerceAtLeast(0L)
+        }
 
         /**
          * Static render stream sink for WebRTC AEC.
@@ -397,31 +557,75 @@ class MicrophoneInput(
 
         @Synchronized
         internal fun updateRenderStreamSink(sink: ((ByteArray) -> Unit)?) {
-            renderStreamSink = sink
+            renderStreamSink = if (sink == null) {
+                lastRenderFeedAtMs = 0L
+                null
+            } else {
+                { pcmBytes ->
+                    lastRenderFeedAtMs = System.currentTimeMillis()
+                    sink(pcmBytes)
+                }
+            }
+        }
+
+        @Synchronized
+        private fun setCurrentWebRtcStreamDelayMs(value: Int?) {
+            currentWebRtcStreamDelayMs = value
         }
 
         @VisibleForTesting
-        internal fun setEchoDiagnosticsForTesting(
-            requestedEchoMode: String,
-            activeEchoMode: String,
+        internal fun setInputProcessingDiagnosticsForTesting(
+            requestedInputProcessingMode: String,
+            activeInputProcessingMode: String,
             platformAecAvailable: Boolean,
             platformAecEnabled: Boolean,
+            effectiveAecEnabled: Boolean = false,
+            effectiveAgcEnabled: Boolean = false,
+            effectiveNsEnabled: Boolean = false,
+            webRtcApmInitialized: Boolean = false,
         ) {
-            updateEchoDiagnostics(
-                requestedEchoMode = requestedEchoMode,
-                activeEchoMode = activeEchoMode,
+            updateInputProcessingDiagnostics(
+                requestedInputProcessingMode = requestedInputProcessingMode,
+                activeInputProcessingMode = activeInputProcessingMode,
                 platformAecAvailable = platformAecAvailable,
                 platformAecEnabled = platformAecEnabled,
+                effectiveAecEnabled = effectiveAecEnabled,
+                effectiveAgcEnabled = effectiveAgcEnabled,
+                effectiveNsEnabled = effectiveNsEnabled,
+                webRtcApmInitialized = webRtcApmInitialized,
             )
         }
 
-        private fun normalizeEchoMode(mode: String): String {
+        @VisibleForTesting
+        internal fun setLastRenderFeedTimestampForTesting(timestampMs: Long) {
+            lastRenderFeedAtMs = timestampMs
+        }
+
+        private fun normalizeInputProcessingMode(mode: String): String {
             return when (mode.lowercase()) {
-                // Backward compatibility for older persisted values.
-                "platform" -> "hardware"
                 "hardware", "webrtc", "speex" -> mode.lowercase()
                 else -> "hardware"
             }
+        }
+
+        internal fun shouldUseHardwarePlatformEffects(mode: String): Boolean =
+            normalizeInputProcessingMode(mode) == "hardware"
+
+        internal fun estimateAdaptiveWebRtcStreamDelayMs(
+            baseDelayMs: Int,
+            nowMs: Long = System.currentTimeMillis(),
+        ): Int {
+            val sinceRenderMs =
+                if (lastRenderFeedAtMs == 0L) Long.MAX_VALUE else nowMs - lastRenderFeedAtMs
+            val targetDelayMs = when {
+                sinceRenderMs <= 80L -> baseDelayMs
+                sinceRenderMs <= 220L -> baseDelayMs + 30
+                sinceRenderMs <= 450L -> baseDelayMs + 60
+                // During silence/no render, keep baseline to avoid carrying a stale
+                // inflated delay into the next playback burst.
+                else -> baseDelayMs
+            }
+            return targetDelayMs.coerceIn(0, 500)
         }
     }
 }

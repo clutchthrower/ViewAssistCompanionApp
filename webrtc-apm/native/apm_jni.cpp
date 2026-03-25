@@ -60,7 +60,6 @@ MapNsLevel(jint level) {
 // ---------------------------------------------------------------------------
 static webrtc::AudioProcessing::Config
 BuildConfig(jboolean aecEnabled,
-            jboolean aecMobileMode,
             jboolean nsEnabled,
             jint     nsLevel,
             jboolean agc2Enabled,
@@ -73,8 +72,6 @@ BuildConfig(jboolean aecEnabled,
     config.high_pass_filter.enabled       = hpfEnabled;
 
     config.echo_canceller.enabled         = aecEnabled;
-    // Newer WebRTC configs no longer expose a mobile_mode toggle.
-    (void)aecMobileMode;
 
     config.noise_suppression.enabled      = nsEnabled;
     config.noise_suppression.level        = MapNsLevel(nsLevel);
@@ -91,7 +88,6 @@ BuildConfig(jboolean aecEnabled,
 
 static jlong nativeCreate(JNIEnv* /*env*/, jclass /*clazz*/,
                            jboolean aecEnabled,
-                           jboolean aecMobileMode,
                            jboolean nsEnabled,
                            jint     nsLevel,
                            jboolean agc2Enabled,
@@ -99,7 +95,7 @@ static jlong nativeCreate(JNIEnv* /*env*/, jclass /*clazz*/,
                            jboolean transientSuppressionEnabled,
                            jboolean vadEnabled) {
 
-    auto config = BuildConfig(aecEnabled, aecMobileMode,
+    auto config = BuildConfig(aecEnabled,
                               nsEnabled, nsLevel,
                               agc2Enabled, hpfEnabled,
                               transientSuppressionEnabled, vadEnabled);
@@ -115,8 +111,8 @@ static jlong nativeCreate(JNIEnv* /*env*/, jclass /*clazz*/,
     ctx->apm         = std::move(apm);
     ctx->vad_enabled = vadEnabled;
 
-    LOGI("APM created successfully (AEC=%d mobile=%d NS=%d/%d AGC2=%d HPF=%d TS=%d VAD=%d)",
-         aecEnabled, aecMobileMode, nsEnabled, nsLevel,
+    LOGI("APM created successfully (AEC=%d NS=%d/%d AGC2=%d HPF=%d TS=%d VAD=%d)",
+         aecEnabled, nsEnabled, nsLevel,
          agc2Enabled, hpfEnabled, transientSuppressionEnabled, vadEnabled);
 
     return reinterpret_cast<jlong>(ctx);
@@ -252,7 +248,6 @@ static jboolean nativeHasVoice(JNIEnv* /*env*/, jclass /*clazz*/,
 static jint nativeReconfigure(JNIEnv* /*env*/, jclass /*clazz*/,
                                jlong handle,
                                jboolean aecEnabled,
-                               jboolean aecMobileMode,
                                jboolean nsEnabled,
                                jint     nsLevel,
                                jboolean agc2Enabled,
@@ -263,7 +258,7 @@ static jint nativeReconfigure(JNIEnv* /*env*/, jclass /*clazz*/,
     auto* ctx = reinterpret_cast<ApmContext*>(handle);
     if (!ctx) return -1;
 
-    auto config = BuildConfig(aecEnabled, aecMobileMode,
+    auto config = BuildConfig(aecEnabled,
                               nsEnabled, nsLevel,
                               agc2Enabled, hpfEnabled,
                               transientSuppressionEnabled, vadEnabled);
@@ -282,13 +277,13 @@ static jint nativeReconfigure(JNIEnv* /*env*/, jclass /*clazz*/,
 
 static const JNINativeMethod sMethods[] = {
     // name                         signature                       function pointer
-    {"nativeCreate",                "(ZZZIZZZZ)J",                  reinterpret_cast<void*>(nativeCreate)},
+    {"nativeCreate",                "(ZZIZZZZ)J",                   reinterpret_cast<void*>(nativeCreate)},
     {"nativeDestroy",               "(J)V",                         reinterpret_cast<void*>(nativeDestroy)},
     {"nativeProcessStream",         "(J[SI)I",                      reinterpret_cast<void*>(nativeProcessStream)},
     {"nativeProcessReverseStream",  "(J[SI)I",                      reinterpret_cast<void*>(nativeProcessReverseStream)},
     {"nativeSetStreamDelay",        "(JI)I",                        reinterpret_cast<void*>(nativeSetStreamDelay)},
     {"nativeHasVoice",              "(J)Z",                         reinterpret_cast<void*>(nativeHasVoice)},
-    {"nativeReconfigure",           "(JZZZIZZZZ)I",                 reinterpret_cast<void*>(nativeReconfigure)},
+    {"nativeReconfigure",           "(JZZIZZZZ)I",                  reinterpret_cast<void*>(nativeReconfigure)},
 };
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {

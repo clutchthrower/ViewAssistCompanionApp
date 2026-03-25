@@ -18,6 +18,7 @@ interface SatelliteCallback {
     fun onSatelliteStopped()
     fun onRequestInputAudioStream()
     fun onReleaseInputAudioStream()
+    fun onAudioOutputPlaybackChanged(isPlaying: Boolean)
 }
 
 /**
@@ -117,6 +118,9 @@ class SatelliteServer(
             callback.onReleaseInputAudioStream()
         }
     }
+
+    fun notifyAudioOutputPlaybackChanged(isPlaying: Boolean) =
+        callback.onAudioOutputPlaybackChanged(isPlaying)
 
     // endregion
 }

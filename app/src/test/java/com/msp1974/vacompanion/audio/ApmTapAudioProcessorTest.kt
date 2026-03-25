@@ -151,6 +151,31 @@ class ApmTapAudioProcessorTest {
         assertTrue(outputSamples in (expected - 8)..(expected + 8))
     }
 
+    @Test
+    fun `intermittent tone and silence chunks keep stable output pacing`() {
+        val capture = ByteArrayOutputStream()
+        val processor = ApmTapAudioProcessor { { bytes -> capture.write(bytes) } }
+        configureAndFlush(processor, sampleRateHz = 48_000, channelCount = 2)
+
+        val cycles = 120 // 24s total: 120 * (100ms tone + 100ms silence)
+        val framesPerChunk = 4_800
+        val tone = ShortArray(framesPerChunk * 2)
+        for (i in tone.indices step 2) {
+            tone[i] = 6_000
+            tone[i + 1] = 6_000
+        }
+        val silence = ShortArray(framesPerChunk * 2)
+
+        repeat(cycles) {
+            processor.queueInput(directPcm16Buffer(tone))
+            processor.queueInput(directPcm16Buffer(silence))
+        }
+
+        val outputSamples = capture.size() / VacaAudioFormat.BYTES_PER_SAMPLE
+        val expected = cycles * 2 * (framesPerChunk / 3)
+        assertTrue(outputSamples in (expected - 12)..(expected + 12))
+    }
+
     private fun configureAndFlush(
         processor: ApmTapAudioProcessor,
         sampleRateHz: Int,
