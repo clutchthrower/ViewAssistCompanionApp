@@ -81,9 +81,15 @@ class ApmTapAudioProcessor(
             tapAndFeedRenderStream(inputBuffer.duplicate(), sink)
         }
 
-        val outputBuffer = replaceOutputBuffer(inputBuffer.remaining())
-        outputBuffer.put(inputBuffer)
+        val remaining = inputBuffer.remaining()
+        val outputBuffer = replaceOutputBuffer(remaining)
+        // ExoPlayer may reuse/directly share ByteBuffer instances across stages.
+        // Copying from a duplicate prevents IllegalArgumentException ("source buffer is this buffer")
+        // if output and input end up referencing the same underlying object.
+        outputBuffer.put(inputBuffer.duplicate())
         outputBuffer.flip()
+        // Preserve AudioProcessor contract: queued input is considered fully consumed.
+        inputBuffer.position(inputBuffer.limit())
     }
 
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {

@@ -101,8 +101,18 @@ class VoicePlayer(private val context: Context) {
     fun writeAudio(buffer: ByteArray) {
         // Feed render audio to WebRTC AEC before playing (provides echo reference).
         // Uses the static sink set by MicrophoneInput when WebRTC mode is active.
-        MicrophoneInput.renderStreamSink?.invoke(buffer)
-        this.audioTrack?.write(buffer, 0, buffer.size)
+        MicrophoneInput.renderStreamSink?.let { sink ->
+            runCatching {
+                sink(buffer)
+            }.onFailure { error ->
+                // Never allow AEC render-tap failures to block audible playback.
+                log.w("Render tap feed failed: ${error.message}")
+            }
+        }
+        val writeResult = this.audioTrack?.write(buffer, 0, buffer.size) ?: 0
+        if (writeResult < 0) {
+            log.w("AudioTrack write failed with code $writeResult")
+        }
     }
 
     fun stop(force: Boolean = false) {

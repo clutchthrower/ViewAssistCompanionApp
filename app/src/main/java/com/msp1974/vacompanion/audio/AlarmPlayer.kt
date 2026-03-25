@@ -42,7 +42,10 @@ class AlarmPlayer(val context: Context) {
                     .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
                     .build()
 
-                player.setAudioAttributes(audioAttributes, true)
+                // Media3 only supports automatic focus handling for USAGE_MEDIA/USAGE_GAME.
+                // Alarm playback uses USAGE_ALARM, so auto-focus would crash at runtime.
+                // We disable automatic focus here and keep alarm behavior app-controlled.
+                player.setAudioAttributes(audioAttributes, false)
                 player.setMediaItem(MediaItem.fromUri(mediaUri))
                 player.repeatMode = Player.REPEAT_MODE_ONE
                 player.volume = getTargetVolume()

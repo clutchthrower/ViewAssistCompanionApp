@@ -93,7 +93,10 @@ class EffectsPlayer(private val context: Context) {
             .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
             .build()
 
-        player.setAudioAttributes(audioAttributes, true)
+        // Media3 only supports automatic focus handling for USAGE_MEDIA/USAGE_GAME.
+        // Feedback sounds use notification usage, so enabling auto-focus throws.
+        // Keep focus handling explicit/disabled here to avoid runtime IllegalArgumentException.
+        player.setAudioAttributes(audioAttributes, false)
         player.setMediaItem(mediaItem)
         return player
     }
