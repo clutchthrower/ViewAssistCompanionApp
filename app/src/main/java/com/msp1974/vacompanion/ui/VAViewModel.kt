@@ -242,7 +242,7 @@ class VAViewModel: ViewModel(), EventListener {
     fun showClearPairedDeviceDialog() {
         val d = VADialog(
             title = "Clear Paired Device Entry",
-            message = "This will delete the currently paired Home Assistant server and allow another server to connect and pair to this device.",
+            message = "This will delete the currently paired Home Assistant server, clear WebView data, and allow another server to pair to this device cleanly.",
             confirmText = "Confirm",
             dismissText = "Cancel",
             confirmCallback = {
@@ -258,6 +258,7 @@ class VAViewModel: ViewModel(), EventListener {
         config!!.accessToken = ""
         config!!.refreshToken = ""
         config!!.tokenExpiry = 0
+        config!!.eventBroadcaster.notifyEvent(Event("clearWebViewStorage", "", ""))
     }
 
     fun showUUIDChangeDialog(show: Boolean = true) {

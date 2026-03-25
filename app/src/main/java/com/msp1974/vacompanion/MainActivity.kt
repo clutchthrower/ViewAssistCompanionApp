@@ -25,6 +25,9 @@ import android.os.StrictMode
 import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebViewDatabase
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -559,6 +562,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "zoomLevel" -> webView.setZoomLevel(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
                 "refresh" -> webView.reload()
+                "clearWebViewStorage" -> clearWebViewStorage()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
                 "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
@@ -714,6 +718,29 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
 
         webView.refreshDarkMode()
+    }
+
+    private fun clearWebViewStorage() {
+        log.d("Clearing WebView storage")
+        try {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.clearHistory()
+            webView.clearCache(true)
+            webView.clearFormData()
+            webView.clearSslPreferences()
+
+            CookieManager.getInstance().apply {
+                removeAllCookies(null)
+                flush()
+            }
+
+            WebStorage.getInstance().deleteAllData()
+            WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword()
+            WebViewDatabase.getInstance(this).clearFormData()
+        } catch (ex: Exception) {
+            log.e("Failed to clear WebView storage: ${ex.message}")
+        }
     }
 
     private fun updatePermissionStatus() {
