@@ -91,7 +91,7 @@ internal fun buildAudioInputDiagnosticsSensors(snapshot: AudioInputDiagnosticsSn
 
 internal class BackgroundTaskController (private val context: Context): EventListener {
 
-    private val firebase = FirebaseManager.getInstance()
+    private val firebase = FirebaseManager.getInstance(context)
     private var config: APPConfig = APPConfig.getInstance(context)
 
     private val job = SupervisorJob()

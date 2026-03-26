@@ -14,6 +14,7 @@ import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.audio.VacaAudioFormat
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventNotifier
+import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.asIntOrNull
 import kotlinx.serialization.json.*
@@ -40,6 +41,7 @@ enum class PageLoadingStage {
 class APPConfig(val context: Context) {
     private val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
     private val log = Logger()
+    private val firebase = FirebaseManager.getInstance(context)
     var eventBroadcaster: EventNotifier
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         onSharedPreferenceChangedListener(prefs, key)
@@ -372,7 +374,7 @@ class APPConfig(val context: Context) {
         settings["screen_saver"]?.jsonPrimitive?.booleanOrNull?.let { screenSaver = it }
         settings["screen_orientation_mode"]?.jsonPrimitive?.contentOrNull?.let { screenOrientationMode = it }
 
-        Firebase.crashlytics.log("Settings update")
+        firebase.addToCrashLog("Settings update")
     }
 
     @SuppressLint("HardwareIds")
@@ -396,7 +398,7 @@ class APPConfig(val context: Context) {
     fun onSharedPreferenceChangedListener(prefs: SharedPreferences, key: String?) {
         log.d("SharedPreference changed: $key")
         val event = Event(key.toString(), "", "")
-        Firebase.crashlytics.log("${key.toString()} changed")
+        firebase.addToCrashLog("${key.toString()} changed")
         eventBroadcaster.notifyEvent(event)
     }
 
