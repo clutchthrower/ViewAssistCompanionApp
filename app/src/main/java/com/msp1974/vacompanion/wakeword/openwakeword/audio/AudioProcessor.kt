@@ -3,6 +3,7 @@ package com.msp1974.vacompanion.wakeword.openwakeword.audio
 import android.content.res.AssetManager
 import com.msp1974.vacompanion.wakeword.openwakeword.ml.EmbeddingModel
 import com.msp1974.vacompanion.wakeword.openwakeword.ml.MelSpectrogram
+import com.msp1974.vacompanion.audio.VacaAudioFormat
 import java.util.*
 import kotlin.random.Random
 
@@ -16,7 +17,7 @@ internal class AudioProcessor(
 
     companion object {
         private const val N_PREPARED_SAMPLES = 1280
-        private const val SAMPLE_RATE = 16000
+        private const val SAMPLE_RATE = VacaAudioFormat.SAMPLE_RATE_HZ
         private const val MEL_SPECTROGRAM_MAX_LEN = 10 * 97
         private const val FEATURE_BUFFER_MAX_LEN = 120
         private const val WINDOW_SIZE = 76

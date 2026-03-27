@@ -12,7 +12,7 @@ import kotlin.math.min
  * including noise suppression, echo cancellation, AGC, and VAD
  */
 class SpeexProcessor(
-    private val sampleRate: Int = 16000,
+    private val sampleRate: Int = VacaAudioFormat.SAMPLE_RATE_HZ,
     private val frameSize: Int = 320,
     private val filterLength: Int = 200
 ) {
@@ -108,15 +108,15 @@ class SpeexProcessor(
     
     /**
      * Set denoise suppression level
-     * @param level 0 to 15 (higher = more aggressive)
+     * @param level 0 to 100 (higher = more aggressive % suppression)
      */
     fun setDenoiseSuppression(level: Int) {
-        denoiseState.suppressionLevel = level.coerceIn(0, 15)
+        denoiseState.suppressionLevel = level.coerceIn(0, 100)
     }
     
     /**
      * Set AGC target level
-     * @param level Target level in dB (typically 8000-32000)
+     * @param level Target peak amplitude in raw PCM samples (typically 8000-32000)
      */
     fun setAGCLevel(level: Int) {
         agcState.targetLevel = level
@@ -145,7 +145,7 @@ class SpeexProcessor(
  * Denoise State - Implements spectral noise suppression
  */
 private class DenoiseState(private val frameSize: Int) {
-    var suppressionLevel = 10
+    var suppressionLevel = 50
     private val noiseEstimate = FloatArray(frameSize)
     private val smoothingFactor = 0.9f
     private var frameCount = 0
@@ -166,7 +166,7 @@ private class DenoiseState(private val frameSize: Int) {
         }
         
         // Apply noise suppression
-        val suppressionFactor = suppressionLevel / 15f
+        val suppressionFactor = suppressionLevel / 100f
         for (i in floatInput.indices) {
             val signalLevel = abs(floatInput[i])
             val noiseLevel = noiseEstimate[i] * suppressionFactor
@@ -348,7 +348,7 @@ private class VADState {
 class SpeexCodec(
     private val quality: Int = 8, // 0-10 (higher = better quality)
     private val complexity: Int = 3, // 1-10 (higher = slower)
-    private val sampleRate: Int = 16000
+    private val sampleRate: Int = VacaAudioFormat.SAMPLE_RATE_HZ
 ) {
     private val frameSize = when (sampleRate) {
         8000 -> 160

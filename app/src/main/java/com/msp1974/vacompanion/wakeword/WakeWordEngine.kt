@@ -29,7 +29,7 @@ open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel)
         if (engine == WakeWordEngineModel.MICROWAKEWORD) {
             val availableWakeWords = AssetWakeWordProvider(context.assets, "wakeWords").get()
             val availableStopWords = AssetWakeWordProvider(context.assets, "stopWords").get()
-            return MicroWakeWordEngine(context, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.isMuted)
+            return MicroWakeWordEngine(context, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.micMuted)
         } else if (engine == WakeWordEngineModel.OPENWAKEWORD){
             val wakeWords = WakeWords(context).getWakeWords()
             if (config.wakeWord in wakeWords.keys) {
@@ -46,7 +46,7 @@ open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel)
                     context = context,
                     models = models,
                     detectionCooldownMs = 1500L,
-                    muted = config.isMuted
+                    muted = config.micMuted
                 )
             }
         }

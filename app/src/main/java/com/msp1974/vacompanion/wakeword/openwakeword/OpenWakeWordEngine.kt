@@ -139,25 +139,33 @@ class OpenWakeWordEngine(
     override fun start() = muted.flatMapLatest {
         if (it) emptyFlow()
         else flow {
-            val microphoneInput = MicrophoneInput(frameSize = 1280)
+            val audioSource = MicrophoneInput.mapAudioSource(config.micAudioSource)
+            val microphoneInput = MicrophoneInput(
+                context = context,
+                audioSource = audioSource,
+                frameSize = 1280,
+                gainProvider = { config.micGain },
+                noiseSuppressionProvider = { config.noiseSuppressionLevel },
+                audioInputProcessingModeProvider = { config.audioInputProcessingMode }
+            )
             try {
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))
                 while (true) {
                     val audio = microphoneInput.readFloat()
+                    val frameTimestamp = System.currentTimeMillis()
 
                     if (audio.isNotEmpty()) {
 
                         if (config.diagnosticsEnabled) {
-                            emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audio)))
+                            emit(AudioResult.AudioLevel(microphoneInput.currentRms))
                         }
 
-                        if (isStreaming) {
-                            val a = AudioDSP().floatArrayToByteBuffer(audio)
-                            emit(AudioResult.Audio(ByteString.copyFrom(a)))
-                        }
+                        // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer
+                        val a = AudioDSP().floatArrayToByteBuffer(audio)
+                        emit(AudioResult.Audio(ByteString.copyFrom(a), timestamp = frameTimestamp))
 
-                        val detections = processAudio(audio)
+                        val detections = processAudio(audio, frameTimestamp)
                         for (detection in detections) {
                             if (detection.detected) {
                                 emit(AudioResult.WakeDetected(detection))
@@ -174,7 +182,7 @@ class OpenWakeWordEngine(
     }
 
     @SuppressLint("DefaultLocale")
-    fun processAudio(audioBuffer: FloatArray): List<WakeWordDetection> {
+    fun processAudio(audioBuffer: FloatArray, timestamp: Long = System.currentTimeMillis()): List<WakeWordDetection> {
         val detections = mutableListOf<WakeWordDetection>()
 
         if (isEnabled) {
@@ -193,7 +201,8 @@ class OpenWakeWordEngine(
                                 model.name,
                                 model.name,
                                 isWakeWordDetected(model, score),
-                                score
+                                score,
+                                timestamp = timestamp
                             )
                         )
                     }

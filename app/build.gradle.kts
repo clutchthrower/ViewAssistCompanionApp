@@ -66,6 +66,9 @@ android {
             optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
         }
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 
@@ -86,14 +89,15 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics.ndk)
-    implementation (libs.androidx.material.icons.extended)
-    implementation (libs.androidx.preference.ktx)
-    implementation (libs.timber)
-    implementation (libs.onnxruntime.android)
-    implementation (libs.semver)
-    implementation (libs.okhttp)
-    implementation (libs.androidx.webkit)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.preference.ktx)
+    implementation(libs.timber)
+    implementation(libs.onnxruntime.android)
+    implementation(libs.semver)
+    implementation(libs.okhttp)
+    implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.serialization.json)
+    implementation(project(":webrtc-apm"))
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.compose)
     implementation(libs.androidx.camera.lifecycle)
@@ -105,6 +109,8 @@ dependencies {
     implementation(libs.protobuf.kotlin)
     implementation(libs.androidx.lifecycle.service)
     testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    androidTestImplementation(libs.mockk.android)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

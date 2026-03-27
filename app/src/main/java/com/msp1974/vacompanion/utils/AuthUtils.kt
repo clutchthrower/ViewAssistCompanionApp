@@ -10,7 +10,7 @@ import com.msp1974.vacompanion.jsinterface.ExternalAuthCallback
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
+import kotlinx.serialization.json.*
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -101,27 +101,11 @@ class AuthUtils(val config: APPConfig) {
             if (auth.accessToken != "" && auth.expires > System.currentTimeMillis()) {
                 log.d("Received new auth token")
                 config.accessToken = auth.accessToken
-
-                // Manage any diff to device time
-                val diff = auth.expires - System.currentTimeMillis()
-                config.tokenExpiry = System.currentTimeMillis() + diff
+                config.tokenExpiry = auth.expires
                 return true
             } else {
                 return false
             }
-        }
-
-        private fun tokenExpiryRefreshTask(view: WebView) {
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    if (System.currentTimeMillis() > config.tokenExpiry && config.refreshToken != "") {
-                        if (reAuthWithRefreshToken()) {
-                            callAuthJS(view)
-                        }
-                    }
-                    tokenExpiryRefreshTask(view)
-                } catch (e: Exception) {}
-            }, 30000)
         }
     }
 
@@ -131,11 +115,10 @@ class AuthUtils(val config: APPConfig) {
         var state: String = ""
 
         fun getHAUrl(config: APPConfig, withDashboardPath: Boolean = true): String {
-            var url = ""
-            if (config.homeAssistantURL == "") {
-                url = "http://${config.homeAssistantConnectedIP}:${config.homeAssistantHTTPPort}"
+            val url = if (config.homeAssistantURL == "") {
+                "http://${config.homeAssistantConnectedIP}:${config.homeAssistantHTTPPort}"
             } else {
-                url = config.homeAssistantURL.removeSuffix("/")
+                config.homeAssistantURL.removeSuffix("/")
             }
 
             if (withDashboardPath && config.homeAssistantDashboard != "") {
@@ -180,10 +163,8 @@ class AuthUtils(val config: APPConfig) {
 
         private fun generateState(): String {
             val charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-            val random = Random.Default
-            state = ""
-            repeat(32) {
-                state += charset[random.nextInt(0, charset.length)]
+            state = buildString(32) {
+                repeat(32) { append(charset[Random.Default.nextInt(charset.length)]) }
             }
             return state
         }
@@ -224,21 +205,35 @@ class AuthUtils(val config: APPConfig) {
                 "client_id" to getClientId(),
                 "code" to authCode
             )
-            log.d("URL: ${getTokenUrl(baseUrl)} Auth code: $authCode, client id: ${getClientId()}")
+            log.d("URL: $url Auth code: $authCode, client id: ${getClientId()}")
             val response = httpPOST(url, map, verifySSL)
             try {
-                val json = JSONObject(response)
-                val expiresIn = System.currentTimeMillis() + (json.getString("expires_in").toInt() * 1000)
+                val json = Json.parseToJsonElement(response).jsonObject
+                val accessToken = json["access_token"]?.jsonPrimitive?.content ?: ""
+                val tokenType = json["token_type"]?.jsonPrimitive?.content ?: ""
+                val refreshToken = json["refresh_token"]?.jsonPrimitive?.content ?: ""
+                
+                if (accessToken.isEmpty() || tokenType.isEmpty()) {
+                    log.e("Authentication failed: Required token fields missing")
+                    return AuthToken()
+                }
 
+                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
+                if (expiresInSeconds == null || expiresInSeconds <= 0) {
+                    log.e("Authentication failed: invalid expires_in")
+                    return AuthToken()
+                }
+                
+                val expiresIn = System.currentTimeMillis() + (expiresInSeconds * 1000)
 
                 return AuthToken(
-                    json.getString("token_type"),
-                    json.getString("access_token"),
+                    tokenType,
+                    accessToken,
                     expiresIn,
-                    json.getString("refresh_token")
+                    refreshToken
                 )
             } catch (e: Exception) {
-                log.e(e.message.toString())
+                log.e("Failed to parse auth response: ${e.message}")
                 return AuthToken()
             }
         }
@@ -250,41 +245,44 @@ class AuthUtils(val config: APPConfig) {
                 "client_id" to getClientId(),
                 "refresh_token" to refreshToken
             )
-            log.d("URL: ${getTokenUrl(host)} Refresh token: $refreshToken, client id: ${getClientId()}")
+            log.d("URL: $url Refresh token: $refreshToken, client id: ${getClientId()}")
             val response = httpPOST(url, map, verifySSL)
             try {
-                val json = JSONObject(response)
-                log.d("JSON reposne: $json")
-                val expiresIn = System.currentTimeMillis() + (json.getString("expires_in").toInt() * 1000)
+                val json = Json.parseToJsonElement(response).jsonObject
+                log.d("JSON response: $json")
+                
+                val accessToken = json["access_token"]?.jsonPrimitive?.content ?: ""
+                val tokenType = json["token_type"]?.jsonPrimitive?.content ?: ""
+                
+                if (accessToken.isEmpty() || tokenType.isEmpty()) {
+                    log.e("Token refresh failed: Required fields missing")
+                    return AuthToken()
+                }
+
+                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
+                if (expiresInSeconds == null || expiresInSeconds <= 0) {
+                    log.e("Token refresh failed: invalid expires_in")
+                    return AuthToken()
+                }
+
+                val expiresIn = System.currentTimeMillis() + (expiresInSeconds * 1000)
 
                 return AuthToken(
-                    json.getString("token_type"),
-                    json.getString("access_token"),
+                    tokenType,
+                    accessToken,
                     expiresIn,
                 )
             } catch (e: Exception) {
-                log.e(e.message.toString())
+                log.e("Failed to parse refresh response: ${e.message}")
                 return AuthToken()
             }
 
         }
 
         fun httpPOST(url: String, parameters: HashMap<String, String>, verifySSL: Boolean = true): String {
-            val clientBuilder = OkHttpClient.Builder()
+            val client = if (verifySSL) httpClient else httpClientTrustAll
             val builder = FormBody.Builder()
             val it = parameters.entries.iterator()
-
-            if (!verifySSL) {
-                val sslContext = SSLContext.getInstance("SSL")
-                sslContext.init(null, trustAllCerts, java.security.SecureRandom())
-                clientBuilder.sslSocketFactory(
-                    sslContext.socketFactory,
-                    trustAllCerts[0] as X509TrustManager
-                )
-                clientBuilder.hostnameVerifier { hostname, session -> true }
-            }
-            val client = clientBuilder.build()
-
 
             while (it.hasNext()) {
                 val pair = it.next() as Map.Entry<*, *>
@@ -309,6 +307,16 @@ class AuthUtils(val config: APPConfig) {
                 log.e("Error authorising with HA: ${e.message.toString()}")
                 return ""
             }
+        }
+
+        val httpClient: OkHttpClient = OkHttpClient()
+        val httpClientTrustAll: OkHttpClient by lazy {
+            val sslContext = SSLContext.getInstance("SSL")
+            sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+            OkHttpClient.Builder()
+                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                .hostnameVerifier { _, _ -> true }
+                .build()
         }
 
         val trustAllCerts = arrayOf<TrustManager>(@SuppressLint("CustomX509TrustManager")

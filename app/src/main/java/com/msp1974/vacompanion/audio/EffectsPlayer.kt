@@ -1,0 +1,137 @@
+package com.msp1974.vacompanion.audio
+
+import android.content.Context.AUDIO_SERVICE
+import android.content.Context
+import android.media.AudioManager
+import android.os.Handler
+import androidx.core.net.toUri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import com.msp1974.vacompanion.settings.APPConfig
+import kotlin.math.min
+import timber.log.Timber
+
+internal class StreamVolumeManager(context: Context) {
+    private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
+
+    fun getStreamMaxVolume(stream: Int): Int {
+        return audioManager.getStreamMaxVolume(stream)
+    }
+
+    fun setVolume(stream: Int, volume: Int) {
+        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream), volume), 0)
+    }
+
+    fun getVolume(stream: Int): Float {
+        return audioManager.getStreamVolume(stream).toFloat() / getStreamMaxVolume(stream).toFloat()
+    }
+}
+
+/**
+ * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
+ * to eliminate buffering latency on first playback and ensure immediate audio feedback.
+ */
+class EffectsPlayer(private val context: Context) {
+    private val players = mutableMapOf<Int, ExoPlayer>()
+    private val config: APPConfig = APPConfig.getInstance(context)
+
+    fun prepare(resId: Int) {
+        if (players.containsKey(resId)) return
+        
+        Handler(context.mainLooper).post {
+            try {
+                val player = createPlayer(resId)
+                player.prepare()
+                players[resId] = player
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+        }
+    }
+
+    fun play(resId: Int) {
+        Handler(context.mainLooper).post {
+            try {
+                // Ensure only one feedback sound plays at a time
+                stopAllInternal()
+
+                val player = players[resId]
+                if (player != null) {
+                    Timber.d("SoundClipPlayer: Playing resource $resId (cached)")
+                    player.seekTo(0)
+                    player.play()
+                } else {
+                    Timber.d("SoundClipPlayer: Playing resource $resId (fallback/uncached)")
+                    // Fallback for non-prepared sounds
+                    val newPlayer = createPlayer(resId)
+                    newPlayer.addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_ENDED) {
+                                newPlayer.release()
+                            }
+                        }
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            Timber.e("SoundClipPlayer Error: ${error.message}")
+                        }
+                    })
+                    newPlayer.prepare()
+                    newPlayer.play()
+                }
+            } catch (ex: Exception) {
+                Timber.e("SoundClipPlayer: Error during play(): ${ex.message}")
+            }
+        }
+    }
+
+    private fun createPlayer(resId: Int): ExoPlayer {
+        val inputMode = config.audioInputProcessingMode
+        val enableRenderTap = MicrophoneInput.shouldEnableWebRtcRenderTap(inputMode)
+        Timber.d("Creating effects ExoPlayer (inputMode=$inputMode, renderTapEnabled=$enableRenderTap)")
+        val player = ApmTappedExoPlayerFactory.create(
+            context = context,
+            enableRenderTap = enableRenderTap,
+        )
+        val mediaItem = MediaItem.fromUri("android.resource://${context.packageName}/$resId".toUri())
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioStream.Feedback.USAGE_EXO)
+            .setContentType(C.AUDIO_CONTENT_TYPE_SONIFICATION)
+            .build()
+
+        // Media3 only supports automatic focus handling for USAGE_MEDIA/USAGE_GAME.
+        // Feedback sounds use notification usage, so enabling auto-focus throws.
+        // Keep focus handling explicit/disabled here to avoid runtime IllegalArgumentException.
+        player.setAudioAttributes(audioAttributes, false)
+        player.setMediaItem(mediaItem)
+        return player
+    }
+
+    fun stopAll() {
+        Handler(context.mainLooper).post {
+            stopAllInternal()
+        }
+    }
+
+    private fun stopAllInternal() {
+        players.values.forEach {
+            if (it.isPlaying) {
+                it.pause()
+                it.seekTo(0)
+            }
+        }
+    }
+
+    fun release() {
+        Handler(context.mainLooper).post {
+            players.values.forEach { it.release() }
+            players.clear()
+        }
+    }
+}
+
+
+
+
+

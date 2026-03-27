@@ -25,6 +25,9 @@ import android.os.StrictMode
 import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebViewDatabase
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -238,16 +241,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 setScreenSaver(true)
                 screenWake()
             } else {
-                if (config.screenBrightness <= 0.3) config.screenBrightness = 0.6f
                 screen.setScreenBrightness(window, config.screenBrightness)
-
                 config.screenTimeout = screen.getScreenTimeout()
-                if (config.screenTimeout < 15000) config.screenTimeout = 15000
                 screen.setScreenTimeout(config.screenTimeout)
                 setScreenSaver(false)
             }
         } else if (viewModel.vacaState.value.satelliteRunning) {
-            screen.setScreenBrightness(window, config.screenBrightness)
             screen.setScreenAutoBrightness(window, config.screenAutoBrightness)
             screen.setScreenTimeout(config.screenTimeout)
             screen.setScreenAlwaysOn(window, config.screenAlwaysOn)
@@ -322,6 +321,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             addAction(BroadcastSender.SATELLITE_STOPPED)
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)
+            addAction(BroadcastSender.TOAST_MESSAGE)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(satelliteBroadcastReceiver, filter)
@@ -375,6 +375,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     webView.loadUrl(url)
                 }
                 Intent.ACTION_SCREEN_ON -> {
+                    this@MainActivity.setTurnScreenOn(false)
                     if (initialised) {
                         // If woken by hardware buttons set screen config
                         setScreenSettings()
@@ -388,6 +389,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
                     if (config.doNotDisturb != dndEnabled) {
                         config.doNotDisturb = dndEnabled
+                    }
+                }
+                BroadcastSender.TOAST_MESSAGE -> {
+                    val msg = intent.getStringExtra("extra") ?: ""
+                    if (msg.isNotEmpty()) {
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -463,6 +470,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 runBackgroundTasks()
             }
         }
+
+        this.setTurnScreenOn(false)
+
         setScreenSettings()
     }
 
@@ -532,7 +542,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         screen.setScreenAlwaysOn(window, enabled)
                     }
                     "screenAutoBrightness" -> {
-                        if (screen.isScreenOn() and !viewModel.vacaState.value.screenBlank) {
+                        if (screen.isScreenOn() && !viewModel.vacaState.value.screenBlank) {
                             screen.setScreenAutoBrightness(
                                 window,
                                 event.newValue as Boolean
@@ -540,7 +550,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         }
                     }
                     "screenBrightness" -> {
-                        if (screen.isScreenOn() and !viewModel.vacaState.value.screenBlank) {
+                        if (screen.isScreenOn() && !viewModel.vacaState.value.screenBlank) {
                             screen.setScreenBrightness(window, event.newValue as Float)
                         }
                     }
@@ -558,8 +568,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "zoomLevel" -> webView.setZoomLevel(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
                 "refresh" -> webView.reload()
+                "clearWebViewStorage" -> clearWebViewStorage()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
+                "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
                 "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()
@@ -569,6 +581,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     this,
                     event.newValue as String,
                     Toast.LENGTH_SHORT
+                ).show()
+                "showToastError" -> Toast.makeText(
+                    this,
+                    "⚠️ ${event.newValue}",
+                    Toast.LENGTH_LONG
                 ).show()
                 else -> consumed = false
             }
@@ -615,32 +632,33 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun screenWake() {
-        Timber.d("Wake screen")
-        // Cancel any screen sleep timer
-        if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
-            screenSleepWaitJob!!.cancel()
+        if (!screen.isScreenOn() && !screenOffInProgress) {
+            Timber.d("Wake screen")
+            // Cancel any screen sleep timer
+            if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
+                screenSleepWaitJob!!.cancel()
+            }
+
+            this.setTurnScreenOn(true)
+            screen.wakeScreen()
         }
 
-        // Experimental fix for screen not turning on on A15+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            this.setTurnScreenOn(true);
-        } else {
-            window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        }
-
-        screen.wakeScreen()
-
-        if (viewModel.vacaState.value.screenBlank && initialised) {
+        screenOffInProgress = false
+        if (initialised) {
             setScreenSaver(false)
+            setScreenSettings()
         }
     }
 
     fun screenSleep() {
+        if (screen.isScreenOff() && !screenOffInProgress) {
+            Timber.d("Screen already off, ignoring sleep request")
+            return
+        }
         Timber.d("Sleeping screen")
         if (permissions.isDeviceAdmin()) {
             screen.setPartialWakeLock()
             lockScreen()
-            setScreenSaver(false)
             return
         }
 
@@ -648,6 +666,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             Timber.d("Sleeping screen via timeout")
             screenOffInProgress = true
             setScreenSaver(true)
+            screen.setScreenAlwaysOn(window, false) // Ensure screen CAN turn off
             screen.setPartialWakeLock()
             if (screen.setScreenTimeout(1000)) {
                 screenSleepWaitJob = lifecycleScope.launch {
@@ -680,9 +699,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             screenOffInProgress = false
             return
         }
-        config.screenOn = false
+        if (config.screenOn) {
+            config.screenOn = false
+        }
         screenOffInProgress = false
-        setScreenSaver(false)
         log.d("Screen off")
     }
 
@@ -704,6 +724,29 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
 
         webView.refreshDarkMode()
+    }
+
+    private fun clearWebViewStorage() {
+        log.d("Clearing WebView storage")
+        try {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.clearHistory()
+            webView.clearCache(true)
+            webView.clearFormData()
+            webView.clearSslPreferences()
+
+            CookieManager.getInstance().apply {
+                removeAllCookies(null)
+                flush()
+            }
+
+            WebStorage.getInstance().deleteAllData()
+            WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword()
+            WebViewDatabase.getInstance(this).clearFormData()
+        } catch (ex: Exception) {
+            log.e("Failed to clear WebView storage: ${ex.message}")
+        }
     }
 
     private fun updatePermissionStatus() {
@@ -994,6 +1037,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
 
         super.onTrimMemory(level)
+    }
+
+    override fun setTurnScreenOn(turnScreenOn: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            super.setTurnScreenOn(turnScreenOn)
+        }
     }
 }
 

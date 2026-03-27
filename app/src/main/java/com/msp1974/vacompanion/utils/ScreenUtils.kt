@@ -35,6 +35,12 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
 
     fun setScreenBrightness(window: Window, brightness: Float) {
         try {
+            // Always set window attribute as an override or fallback
+            // This works even if auto-brightness is enabled for the system
+            val layout: WindowManager.LayoutParams? = window.attributes
+            layout?.screenBrightness = brightness
+            window.attributes = layout
+
             if (!getScreenAutoBrightnessMode()) {
                 if (canWriteScreenSetting()) {
                     Settings.System.putInt(
@@ -42,10 +48,6 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
                         Settings.System.SCREEN_BRIGHTNESS,
                         (brightness * 255).toInt()
                     )
-                } else {
-                    val layout: WindowManager.LayoutParams? = window.attributes
-                    layout?.screenBrightness = brightness
-                    window.attributes = layout
                 }
             }
         } catch (e: Exception) {
@@ -64,6 +66,10 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
             setScreenBrightness(window, config.screenBrightness)
         } else {
             setDeviceBrightnessMode(true)
+            // Clear window override to let auto-brightness work
+            val layout: WindowManager.LayoutParams? = window.attributes
+            layout?.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE // -1.0f
+            window.attributes = layout
         }
     }
 
