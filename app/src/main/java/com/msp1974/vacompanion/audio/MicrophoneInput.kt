@@ -134,6 +134,7 @@ class MicrophoneInput(
 
     companion object {
         const val DEFAULT_AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_RECOGNITION
+        const val ANDROID_IOT_AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
         const val DEFAULT_SAMPLE_RATE_IN_HZ = 16000
         const val DEFAULT_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val DEFAULT_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
