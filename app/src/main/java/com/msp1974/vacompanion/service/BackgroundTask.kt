@@ -323,8 +323,17 @@ internal class BackgroundTaskController (private val context: Context): EventLis
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun runWakeWordDetection() {
+        var addDelay: Boolean = false
+        if (wakeWordJob != null && wakeWordJob!!.isActive) {
+            terminateWakeWordDetection()
+            addDelay = true
+        }
+
         wakeWordJob = scope.launch {
-            delay(1000L)
+            if (addDelay) {
+                delay(2000)
+            }
+            Timber.d("Starting wake word detection")
             engine = WakeWordEngine(context,  if (config.wakeWordEngine == "openwakeword") WakeWordEngineModel.OPENWAKEWORD else WakeWordEngineModel.MICROWAKEWORD)
             engine?.setActiveWakeWords(listOf(config.wakeWord))
             engine?.setActiveStopWords(listOf("stop"))
@@ -392,7 +401,7 @@ internal class BackgroundTaskController (private val context: Context): EventLis
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun restartWakeWordDetection() {
         Timber.d("Restarting wake word detection")
-        terminateWakeWordDetection()
+        //terminateWakeWordDetection()
         runWakeWordDetection()
     }
 

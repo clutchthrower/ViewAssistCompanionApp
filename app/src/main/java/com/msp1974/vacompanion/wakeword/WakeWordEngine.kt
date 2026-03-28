@@ -12,7 +12,9 @@ import com.msp1974.vacompanion.wakeword.openwakeword.model.DetectionMode
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordDetection
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 data class WakeWord(val name: String, val fileName: String, val builtIn: Boolean = true)

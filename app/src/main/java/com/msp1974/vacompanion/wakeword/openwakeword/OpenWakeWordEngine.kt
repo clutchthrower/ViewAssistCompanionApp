@@ -169,7 +169,9 @@ class OpenWakeWordEngine(
                     yield()
                 }
             } finally {
-                microphoneInput.close()
+                withContext(NonCancellable) {
+                    microphoneInput.close()
+                }
                 emit(AudioResult.EngineStatus("Stopped"))
             }
         }

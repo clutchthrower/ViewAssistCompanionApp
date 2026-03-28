@@ -13,11 +13,13 @@ import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Helpers.Companion.isAndroidThings
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import timber.log.Timber
 import kotlin.collections.plus
@@ -111,9 +113,11 @@ open class MicroWakeWordEngine (
                     yield()
                 }
             } finally {
-                Timber.i("Stopping MicroWakeWordEngine")
-                microphoneInput.close()
-                detector.close()
+                withContext(NonCancellable) {
+                    Timber.i("Stopping MicroWakeWordEngine")
+                    microphoneInput.close()
+                    detector.close()
+                }
                 emit(AudioResult.EngineStatus("Stopped"))
             }
         }
