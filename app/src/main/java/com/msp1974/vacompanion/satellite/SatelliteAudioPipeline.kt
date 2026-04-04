@@ -61,7 +61,7 @@ abstract class SatelliteAudioPipeline(
 ): IAudioPipeline {
 
     private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
-    private var audioMessageQueue = Channel<WyomingPacket>(capacity = Channel.UNLIMITED)
+    private var audioMessageQueue = Channel<WyomingPacket>(capacity = 200)
     private var result: PipelineEndReason = PipelineEndReason.NONE
     var pipelineStage = PipelineStage.INIT
         set(value) {
@@ -122,16 +122,20 @@ abstract class SatelliteAudioPipeline(
             "transcribe" -> handleTranscribe()
             "voice-started" -> handleVoiceStarted()
             "voice-stopped" -> handleVoiceStopped()
-            "transcript" -> handleTranscript(packet)
-            "synthesize" -> handleSynthesize(packet)
-            "audio-start", "audio-chunk", "audio-stop" -> audioMessageQueue.send(packet)
+            "transcript" -> handleTranscript()
+            "synthesize" -> handleSynthesize()
+            "audio-start", "audio-chunk", "audio-stop" -> queueAudioMessage(packet)
             "pipeline-ended" -> handlePipelineEnded()
             "error" -> handlePipelineError(packet)
         }
     }
 
+    private suspend fun queueAudioMessage(packet: WyomingPacket) {
+        audioMessageQueue.send(packet)
+    }
+
     private suspend fun audioMessageHandler() {
-        val job = scope.launch(Dispatchers.IO) {
+        val job = scope.launch(Dispatchers.Default) {
             Timber.d("Audio message handler started.")
             try {
                 while (true) {
@@ -143,7 +147,7 @@ abstract class SatelliteAudioPipeline(
                     }
                 }
             } finally {
-                audioMessageQueue.close()
+                audioMessageQueue.cancel()
             }
         }
         result = pipelineRunning.await()
@@ -173,19 +177,19 @@ abstract class SatelliteAudioPipeline(
         pipelineStage = PipelineStage.VOICE_STOPPED
     }
 
-    internal fun handleTranscript(event: WyomingPacket) {
+    internal fun handleTranscript() {
         pipelineStage = PipelineStage.AWAITING_RESPONSE
     }
 
-    internal fun handleSynthesize(event: WyomingPacket) {
-        pipelineStage = PipelineStage.AWAITING_TTS
+    internal fun handleSynthesize() {
+        if (pipelineStage != PipelineStage.STREAMING_TTS) {
+            pipelineStage = PipelineStage.AWAITING_TTS
+        }
     }
 
     internal fun handleAudioStart() {
-        if (pipelineStage == PipelineStage.AWAITING_TTS) {
-            pipelineStage = PipelineStage.STREAMING_TTS
-            mediaManager.pcmMediaPlayer.play()
-        }
+        pipelineStage = PipelineStage.STREAMING_TTS
+        mediaManager.pcmMediaPlayer.play()
     }
 
     internal fun handleAudioChunk(event: WyomingPacket) {
