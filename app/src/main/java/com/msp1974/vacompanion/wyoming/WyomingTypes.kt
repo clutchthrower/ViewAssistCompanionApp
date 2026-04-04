@@ -1,23 +1,56 @@
 package com.msp1974.vacompanion.wyoming
 
+object WyomingEvent {
+    const val PING = "ping"
+    const val PONG = "pong"
+    const val DESCRIBE = "describe"
+    const val INFO = "info"
+    const val RUN_SATELLITE = "run-satellite"
+    const val PAUSE_SATELLITE = "pause-satellite"
+    const val TRANSCRIBE = "transcribe"
+    const val VOICE_STARTED = "voice-started"
+    const val VOICE_STOPPED = "voice-stopped"
+    const val TRANSCRIPT = "transcript"
+    const val SYNTHESIZE = "synthesize"
+    const val AUDIO_START = "audio-start"
+    const val AUDIO_CHUNK = "audio-chunk"
+    const val AUDIO_STOP = "audio-stop"
+    const val PLAYED = "played"
+    const val PIPELINE_ENDED = "pipeline-ended"
+    const val ERROR = "error"
+    const val CUSTOM_EVENT = "custom-event"
+}
+
+/**
+ * Represents the status of the TCP Server
+ */
+enum class ServerState {
+    STOPPED,
+    STARTING,
+    RUNNING,
+    STOPPING,
+}
+
 /**
  * Represents the high-level connection state of the Wyoming satellite.
  */
 enum class SatelliteState { 
     STOPPED, 
-    RUNNING, 
-    STARTING, 
-    STOPPING 
+    RUNNING,
+    STARTING,
+    STOPPING,
+    WAITING_FOR_SETTINGS,
+    ERROR
 }
 
 /**
  * Represents the current stage of an active voice pipeline.
  */
-enum class PipelineStage { 
-    IDLE, 
-    LISTENING, 
-    STREAMING, 
-    AWAITING_TTS 
+enum class PipelineStage {
+    IDLE,
+    LISTENING,
+    STREAMING,
+    AWAITING_TTS
 }
 
 /**

@@ -1,0 +1,298 @@
+package com.msp1974.vacompanion.satellite
+
+import android.content.Context
+import com.msp1974.vacompanion.satellite.Satellite.Companion.isoNow
+import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.Event
+import com.msp1974.vacompanion.wyoming.WyomingMediaManager
+import com.msp1974.vacompanion.wyoming.WyomingPacket
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import timber.log.Timber
+import javax.inject.Inject
+
+enum class PipelineStage {
+    INIT,
+    STARTING,
+    STARTED,
+    LISTENING,
+    VOICE_STARTED,
+    VOICE_STOPPED,
+    AWAITING_RESPONSE,
+    AWAITING_TTS,
+    STREAMING_TTS,
+    ENDED,
+}
+
+enum class PipelineEndReason {
+    NONE,
+    END_OF_PIPELINE,
+    FORCE_STOPPED,
+    TIMED_OUT,
+    ERRORED,
+    DUPLICATE_WAKEUP
+}
+
+interface IAudioPipeline {
+    fun sendMessage(packet: WyomingPacket)
+    fun onStateChange(state: PipelineStage)
+    fun onFinish(reason: PipelineEndReason)
+}
+
+abstract class SatelliteAudioPipeline(
+    val context: Context,
+    val scope: CoroutineScope,
+    val config: APPConfig,
+    val pipelineId: Int,
+    val mediaManager: WyomingMediaManager
+): IAudioPipeline {
+
+    private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
+    private var result: PipelineEndReason = PipelineEndReason.NONE
+    var pipelineStage = PipelineStage.INIT
+        set(value) {
+            field = value
+            onStateChange(value)
+        }
+
+    fun run() {
+        scope.launch {
+            start()
+        }
+    }
+
+
+    suspend fun start(sendDetection: Boolean = false) {
+        withContext(Dispatchers.Default) {
+            val job = scope.launch {
+                try {
+                    pipelineStage = PipelineStage.STARTING
+                    if (sendDetection) {
+                        Timber.d("Sending detection event")
+                        sendMessage(buildDetectionMessage())
+                    }
+                    Timber.d("Starting pipeline [$pipelineId]")
+                    sendMessage(buildRunPipelineMessage())
+                    pipelineStage = PipelineStage.STARTED
+                    awaitCancellation()
+                } finally {
+                    //TODO: Change to audio stop
+                    withContext(NonCancellable) {
+                        val msg = when (result) {
+
+                            PipelineEndReason.END_OF_PIPELINE -> { "Pipeline ended normally" }
+                            PipelineEndReason.FORCE_STOPPED -> { "Pipeline was terminated" }
+                            PipelineEndReason.ERRORED -> { "Pipeline ended with an error" }
+                            PipelineEndReason.TIMED_OUT -> { "Pipeline timed out at stage: $pipelineStage" }
+                            PipelineEndReason.DUPLICATE_WAKEUP -> { "Pipeline ended due to duplicate wake up" }
+                            else -> { "Pipeline ended for unknown reason" }
+                        }
+                        Timber.d("$msg [$pipelineId]")
+                        onFinish(result)
+                        pipelineStage = PipelineStage.ENDED
+                    }
+                }
+            }
+            result = pipelineRunning.await()
+            job.cancel()
+            Timber.d("Pipeline stopped [$pipelineId] -> $result.")
+        }
+    }
+
+    fun stop() {
+        mediaManager.pcmMediaPlayer.stop(force = true)
+        if (pipelineStage != PipelineStage.ENDED) sendMessage(buildAudioStopMessage())
+        pipelineRunning.complete(PipelineEndReason.FORCE_STOPPED)
+    }
+
+    suspend fun processAudioPipelineMessage(packet: WyomingPacket) {
+        when (packet.type) {
+            "transcribe" -> handleTranscribe()
+            "voice-started" -> handleVoiceStarted()
+            "voice-stopped" -> handleVoiceStopped()
+            "transcript" -> handleTranscript(packet)
+            "synthesize" -> handleSynthesize(packet)
+            "audio-start" -> handleAudioStart()
+            "audio-chunk" -> handleAudioChunk(packet)
+            "audio-stop" -> handleAudioStop()
+            "pipeline-ended" -> handlePipelineEnded()
+            "error" -> handlePipelineError(packet)
+        }
+    }
+
+    fun sendMicAudio(audio: ByteArray): Boolean {
+        if (pipelineStage == PipelineStage.LISTENING  || pipelineStage == PipelineStage.VOICE_STARTED) {
+            val packet = buildAudioPacketMessage(audio)
+            sendMessage(packet)
+            return true
+        }
+        return false
+    }
+
+    internal fun handleTranscribe() {
+        pipelineStage = PipelineStage.LISTENING
+    }
+
+    internal fun handleVoiceStarted() {
+        pipelineStage = PipelineStage.VOICE_STARTED
+    }
+
+    internal fun handleVoiceStopped() {
+        pipelineStage = PipelineStage.VOICE_STOPPED
+    }
+
+    internal fun handleTranscript(event: WyomingPacket) {
+        pipelineStage = PipelineStage.AWAITING_RESPONSE
+    }
+
+    internal fun handleSynthesize(event: WyomingPacket) {
+        pipelineStage = PipelineStage.AWAITING_TTS
+    }
+
+    internal fun handleAudioStart() {
+        if (pipelineStage == PipelineStage.AWAITING_TTS) {
+            pipelineStage = PipelineStage.STREAMING_TTS
+            mediaManager.pcmMediaPlayer.play()
+        }
+    }
+
+    internal fun handleAudioChunk(event: WyomingPacket) {
+        if (pipelineStage == PipelineStage.STREAMING_TTS && mediaManager.pcmMediaPlayer.isPlaying) {
+            synchronized(mediaManager) {
+                mediaManager.pcmMediaPlayer.writeAudio(event.payload)
+            }
+        }
+    }
+
+    internal fun handleAudioStop() {
+        if (mediaManager.pcmMediaPlayer.isPlaying) {
+            // We send 'played' but we DON'T stop immediately, to allow draining.
+            // The next synthesizer or a reset will stop it properly.
+            mediaManager.pcmMediaPlayer.stop()
+
+            scope.launch {
+                try {
+                    withTimeout(10000) {
+                        while (mediaManager.pcmMediaPlayer.isPlaying) {
+                            delay(100)
+                            yield()
+                        }
+                    }
+                } finally {
+                    withContext(NonCancellable) {
+                        mediaManager.pcmMediaPlayer.stop(force = true)
+                        sendMessage(buildPlayedMessage())
+                        pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
+                    }
+                }
+            }
+        }
+    }
+
+    internal fun handlePipelineEnded() {
+        if (pipelineStage == PipelineStage.AWAITING_TTS || pipelineStage == PipelineStage.STREAMING_TTS) {
+            Timber.d("Pipeline ended but TTS is in stage $pipelineStage. Waiting for TTS audio to complete")
+        } else {
+            pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
+        }
+    }
+
+
+    internal fun handlePipelineError(event: WyomingPacket) {
+        val code = event.getProp("code")
+        val text = event.getProp("text")
+
+        val isDuplicateWakeUp = code == "duplicate_wake_up_detected"
+
+        if (isDuplicateWakeUp) {
+            Timber.d("Speech-to-text cancelled to avoid duplicate wake-up. Handled gracefully.")
+            pipelineRunning.complete(PipelineEndReason.DUPLICATE_WAKEUP)
+            return
+        }
+
+        val toastMessage = text.ifEmpty { "Error: $code" }
+        config.eventBroadcaster.notifyEvent(Event("recognitionError", toastMessage, code))
+
+        pipelineRunning.complete(PipelineEndReason.ERRORED)
+    }
+
+
+    /**
+     * Notifies of wake word detection.
+     */
+    internal fun buildDetectionMessage(): WyomingPacket {
+        val detectionPacket = WyomingPacket(
+            "detection",
+            buildJsonObject {
+                put("name", config.wakeWord)
+                put("timestamp", isoNow())
+                put("speaker", "")
+            },
+        )
+        return detectionPacket
+    }
+
+    /**
+     * Initiates a pipeline run.
+     */
+    internal fun buildRunPipelineMessage(): WyomingPacket {
+        val packet = WyomingPacket(
+            "run-pipeline",
+            buildJsonObject {
+                put("name", "VACA ${config.uuid}")
+                put("start_stage", "asr")
+                put("end_stage", "tts")
+                put("restart_on_end", false)
+                putJsonObject("snd_format") {
+                    put("rate", config.sampleRate)
+                    put("width", config.audioWidth)
+                    put("channels", config.audioChannels)
+                }
+            }
+        )
+        return packet
+    }
+
+    internal fun buildAudioPacketMessage(audio: ByteArray): WyomingPacket {
+        val packet = WyomingPacket(
+            "audio-chunk",
+            buildJsonObject {
+                put("rate", config.sampleRate)
+                put("width", config.audioWidth)
+                put("channels", config.audioChannels)
+            },
+            audio
+        )
+        return packet
+    }
+
+    internal fun buildAudioStopMessage(): WyomingPacket {
+        val packet = WyomingPacket(
+            "audio-stop",
+            buildJsonObject { put("timestamp", isoNow()) },
+            ByteArray(0),
+        )
+        return packet
+    }
+
+    internal fun buildPlayedMessage(): WyomingPacket {
+        val packet = WyomingPacket(
+            "played",
+            buildJsonObject {},
+            ByteArray(0),
+        )
+        return packet
+    }
+}

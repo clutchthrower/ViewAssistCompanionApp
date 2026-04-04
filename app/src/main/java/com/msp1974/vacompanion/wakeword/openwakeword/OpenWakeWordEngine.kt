@@ -17,6 +17,7 @@ import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordScore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import timber.log.Timber
+import javax.inject.Inject
 import kotlin.math.abs
 
 
@@ -28,12 +29,12 @@ import kotlin.math.abs
  */
 class OpenWakeWordEngine(
     private val context: Context,
+    val config: APPConfig,
     private val models: List<WakeWordModel>,
     private val detectionCooldownMs: Long = 2000L,
     muted: Boolean = false
 ): WakeWordEngineProvider() {
 
-    private val config = APPConfig.getInstance(context)
     private val assetManager: AssetManager = context.assets
     private val modelProcessors = mutableMapOf<WakeWordModel, ModelProcessor>()
     private val detectionCooldowns = mutableMapOf<String, Long>()

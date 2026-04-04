@@ -24,9 +24,9 @@ import androidx.core.net.toUri
 
 class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     val log = Logger()
-    val config = viewModel.config!!
+    val config = viewModel.config
     private val firebase = FirebaseManager.getInstance(config.context)
-    private val resources = viewModel.resources!!
+    private val resources = viewModel.resources
 
     companion object {
 

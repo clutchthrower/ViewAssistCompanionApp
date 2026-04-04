@@ -1,8 +1,7 @@
-package com.msp1974.vacompanion.service
+package com.msp1974.vacompanion.device
 
 import android.Manifest
 import android.content.Context
-import android.content.Context.CAMERA_SERVICE
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
@@ -24,7 +23,7 @@ import androidx.core.app.ActivityCompat
 import com.jjoe64.motiondetection.motiondetection.AggregateLumaMotionDetection
 import com.jjoe64.motiondetection.motiondetection.ImageProcessing
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.AuthUtils.Companion.log
+import com.msp1974.vacompanion.utils.AuthUtils
 import com.msp1974.vacompanion.utils.Event
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,14 +31,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import javax.inject.Inject
 import kotlin.math.absoluteValue
 import kotlin.math.max
 import kotlin.math.min
 
+class Camera(val context: Context, val config: APPConfig) {
 
-class CameraBackgroundTask(val context: Context) {
-
-    private var config: APPConfig = APPConfig.getInstance(context)
     private val scope = CoroutineScope(Dispatchers.Default)
 
     private var checkInterval: Long = 500
@@ -97,7 +95,7 @@ class CameraBackgroundTask(val context: Context) {
                 imageReader = null
 
             } catch (e: Exception) {
-                Timber.e("Error closing camera: $e")
+                Timber.Forest.e("Error closing camera: $e")
             } finally {
                 isRunning = false
             }
@@ -138,7 +136,7 @@ class CameraBackgroundTask(val context: Context) {
                 if (settleDelayJob != null && !settleDelayJob?.isActive!!) {
                     if (detector.detect(img, image.width, image.height)) {
                         if (System.currentTimeMillis() - lastDetection > MOTION_INTERVAL) {
-                            log.d("Motion detected")
+                            AuthUtils.Companion.log.d("Motion detected")
                             config.eventBroadcaster.notifyEvent(Event("motion", "", ""))
                             lastDetection = System.currentTimeMillis()
                         }
@@ -178,7 +176,7 @@ class CameraBackgroundTask(val context: Context) {
         }
 
 
-        cameraManager = context.getSystemService(CAMERA_SERVICE) as CameraManager
+        cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         var camId: String? = null
 
@@ -191,21 +189,21 @@ class CameraBackgroundTask(val context: Context) {
             }
         }
 
-        log.i("Camera ID: $camId")
+        AuthUtils.Companion.log.i("Camera ID: $camId")
 
         previewSize = chooseSupportedSize(camId!!, 320, 240)
-        Timber.d("Camera preview size is $previewSize")
+        Timber.Forest.d("Camera preview size is $previewSize")
 
 
         try {
             cameraManager!!.openCamera(camId, stateCallback, Handler(Looper.getMainLooper()))
         } catch (e: Exception) {
-            log.w("Error accessing camera: $e")
+            AuthUtils.Companion.log.w("Error accessing camera: $e")
         }
 
         // Settle motion detection to reduce false detections at start
         try {
-            log.d("Motion detection running....")
+            AuthUtils.Companion.log.d("Motion detection running....")
             if (settleDelayJob != null && settleDelayJob!!.isActive) {
                 settleDelayJob?.cancel()
             }
@@ -213,14 +211,14 @@ class CameraBackgroundTask(val context: Context) {
                 delay(settleDelay)
             }
         } catch (e: Exception) {
-            log.e("Error on settle job: $e")
+            AuthUtils.Companion.log.e("Error on settle job: $e")
         }
 
     }
 
     private fun chooseSupportedSize(camId: String, textureViewWidth: Int, textureViewHeight: Int): Size {
 
-        val manager = context.getSystemService(CAMERA_SERVICE) as CameraManager
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         // Get all supported sizes for TextureView
         val characteristics = manager.getCameraCharacteristics(camId)
@@ -305,18 +303,18 @@ class CameraBackgroundTask(val context: Context) {
 
 
                         } catch (e: CameraAccessException) {
-                            log.e("createCaptureSession - $e")
+                            AuthUtils.Companion.log.e("createCaptureSession - $e")
                         }
 
                     }
 
                     override fun onConfigureFailed(cameraCaptureSession: CameraCaptureSession) {
-                        log.e("createCaptureSession()")
+                        AuthUtils.Companion.log.e("createCaptureSession()")
                     }
                 }, null
             )
         } catch (e: CameraAccessException) {
-            log.e("createCaptureSession - $e")
+            AuthUtils.Companion.log.e("createCaptureSession - $e")
         }
     }
 }

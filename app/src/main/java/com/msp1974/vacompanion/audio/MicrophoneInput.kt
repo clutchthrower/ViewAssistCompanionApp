@@ -62,7 +62,7 @@ class MicrophoneInput(
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
         if (readCount > 0) {
             if (useSpeex) {
-                speex.setDenoiseSuppression(10)
+                speex.denoiseEnabled = false
                 speex.setAGCLevel(20000)
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }

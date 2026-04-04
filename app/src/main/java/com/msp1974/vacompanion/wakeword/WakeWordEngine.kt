@@ -11,17 +11,19 @@ import com.msp1974.vacompanion.wakeword.openwakeword.OpenWakeWordEngine
 import com.msp1974.vacompanion.wakeword.openwakeword.model.DetectionMode
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordDetection
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flow
 import timber.log.Timber
+import javax.inject.Inject
 
 data class WakeWord(val name: String, val fileName: String, val builtIn: Boolean = true)
 enum class WakeWordEngineModel {MICROWAKEWORD, OPENWAKEWORD}
 
-open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel) {
+open class WakeWordEngine(val context: Context, val config: APPConfig, val engine: WakeWordEngineModel) {
+
     private var activeWakeWords: List<String> = listOf()
     private var activeStopWords: List<String> = listOf()
-    private var config = APPConfig.getInstance(context)
     private var engineInstance: WakeWordEngineProvider? = null
 
 
@@ -29,7 +31,7 @@ open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel)
         if (engine == WakeWordEngineModel.MICROWAKEWORD) {
             val availableWakeWords = AssetWakeWordProvider(context.assets, "wakeWords").get()
             val availableStopWords = AssetWakeWordProvider(context.assets, "stopWords").get()
-            return MicroWakeWordEngine(context, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.isMuted)
+            return MicroWakeWordEngine(context, config, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.isMuted)
         } else if (engine == WakeWordEngineModel.OPENWAKEWORD){
             val wakeWords = WakeWords(context).getWakeWords()
             if (config.wakeWord in wakeWords.keys) {
@@ -44,6 +46,7 @@ open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel)
                 )
                 return OpenWakeWordEngine(
                     context = context,
+                    config = config,
                     models = models,
                     detectionCooldownMs = 1500L,
                     muted = config.isMuted
@@ -92,8 +95,6 @@ open class WakeWordEngine(val context: Context, val engine: WakeWordEngineModel)
         return false
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() = flow {
         engineInstance = get()
         if (engineInstance != null) {

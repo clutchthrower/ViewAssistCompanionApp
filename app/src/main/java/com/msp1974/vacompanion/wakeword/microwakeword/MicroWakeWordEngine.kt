@@ -19,17 +19,19 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.yield
 import timber.log.Timber
+import javax.inject.Inject
 import kotlin.collections.plus
 
 open class MicroWakeWordEngine (
     val context: Context,
+    val config: APPConfig,
     activeWakeWords: List<String>,
     activeStopWords: List<String>,
     val availableWakeWords: List<WakeWordWithId>,
     val availableStopWords: List<WakeWordWithId>,
     muted: Boolean = false
 ): WakeWordEngineProvider() {
-    private val config = APPConfig.getInstance(context)
+
     private val _availableWakeWords = availableWakeWords.associateBy { it.id }
     private val _availableStopWords = availableStopWords.associateBy { it.id }
 

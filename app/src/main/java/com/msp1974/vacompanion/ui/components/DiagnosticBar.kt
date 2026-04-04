@@ -19,9 +19,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.msp1974.vacompanion.service.AudioRouteOption
 import com.msp1974.vacompanion.ui.DiagnosticInfo
 import com.msp1974.vacompanion.ui.theme.CustomColours
+import com.msp1974.vacompanion.satellite.AudioRouteOption
 
 
 @SuppressLint("DefaultLocale")

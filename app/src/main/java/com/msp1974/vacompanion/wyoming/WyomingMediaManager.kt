@@ -4,15 +4,16 @@ import android.content.Context
 import com.msp1974.vacompanion.audio.Alarm
 import com.msp1974.vacompanion.audio.PCMMediaPlayer
 import com.msp1974.vacompanion.audio.VAMediaPlayer
+import com.msp1974.vacompanion.settings.APPConfig
 
-class WyomingMediaManager(private val context: Context) {
-    val alarmPlayer = Alarm(context)
+class WyomingMediaManager(private val context: Context, val config: APPConfig) {
+    val alarmPlayer = Alarm(context, config)
     val pcmMediaPlayer = PCMMediaPlayer(context)
-    val musicPlayer = VAMediaPlayer.getInstance(context)
+    val musicPlayer = VAMediaPlayer.Companion.getInstance(context, config)
 
     fun release() {
         if (pcmMediaPlayer.isPlaying) pcmMediaPlayer.stop()
-        if (alarmPlayer.isSounding) alarmPlayer.stopAlarm()
+        if (alarmPlayer.isSounding()) alarmPlayer.stopAlarm()
         musicPlayer.stop()
     }
 
@@ -27,11 +28,11 @@ class WyomingMediaManager(private val context: Context) {
         val duckMusic = type == "music" || type == "all"
 
         if (active) {
-            if (duckAlarm) alarmPlayer.duckVolume()
+            //if (duckAlarm) alarmPlayer.duckVolume()
             if (duckMusic) musicPlayer.duckVolume()
         } else {
-            if (duckAlarm) alarmPlayer.unDuckVolume()
-            if (duckMusic && !alarmPlayer.isSounding) musicPlayer.unDuckVolume()
+            //if (duckAlarm) alarmPlayer.unDuckVolume()
+            if (duckMusic && !alarmPlayer.isSounding()) musicPlayer.unDuckVolume()
         }
     }
 }

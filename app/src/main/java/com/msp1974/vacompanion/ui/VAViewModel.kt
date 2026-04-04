@@ -1,10 +1,10 @@
 package com.msp1974.vacompanion.ui
 
+import android.app.Application
 import android.content.res.Configuration
 import android.content.res.Resources
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
-import com.msp1974.vacompanion.service.AudioRouteOption
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Event
@@ -12,11 +12,54 @@ import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.Permissions
+import com.msp1974.vacompanion.satellite.AudioRouteOption
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import timber.log.Timber
+import javax.inject.Inject
+
+class VADialog(
+    val title: String = "AlertDialog",
+    val message: String = "Message",
+    val confirmText: String = "Yes",
+    val dismissText: String = "No",
+    val confirmCallback: () -> Unit,
+    val dismissCallback: () -> Unit
+) {
+    fun onConfirm() {
+        confirmCallback()
+    }
+
+    fun onDismiss() {
+        dismissCallback()
+    }
+}
+
+data class UpdateStatus(
+    var updateAvailable: Boolean = false,
+    var availableVersion: String = "0.0.0"
+)
+
+data class PermissionsStatus(
+    var hasCorePermissions: Boolean = false,
+    var hasOptionalPermissions: Boolean = false
+)
+
+data class DiagnosticInfo(
+    var show: Boolean = false,
+    var engine: String = "",
+    var audioLevel: Float = 0f,
+    var detectionThreshold: Float = 0f,
+    var detectionLevel: Float = 0f,
+    var mode: AudioRouteOption = AudioRouteOption.NONE,
+    var wakeWord: String = "",
+    var vadDetection: Boolean = false
+)
+
 
 
 data class State(
@@ -41,27 +84,23 @@ data class State(
     var showUUIDChangeDialog: Boolean = false
     )
 
-class VAViewModel: ViewModel(), EventListener {
-    private val log = Logger()
+@HiltViewModel
+class VAViewModel @Inject constructor(
+    application: Application,
+    val config: APPConfig
+): ViewModelBase(application), EventListener {
 
     private val _vacaState = MutableStateFlow(State())
     val vacaState: StateFlow<State> = _vacaState.asStateFlow()
 
-    var config: APPConfig? = null
-    var resources: Resources? = null
-    var permissions: Permissions? = null
+    var resources: Resources = application.resources
+    var permissions: Permissions = Permissions(application.applicationContext, config)
+
 
 
     init {
         _vacaState.value = State()
-    }
-
-    fun bind(config: APPConfig, resources: Resources) {
-        this.config = config
-        this.resources = resources
-        this.permissions = Permissions(config.context)
-        this.config?.eventBroadcaster?.addListener(this)
-
+        config.eventBroadcaster.addListener(this)
         initValues()
         buildAppInfo()
     }
@@ -69,25 +108,25 @@ class VAViewModel: ViewModel(), EventListener {
     fun initValues() {
         _vacaState.update { currentState ->
             currentState.copy(
-                launchOnBoot = config!!.startOnBoot,
-                swipeRefreshEnabled = config!!.swipeRefresh,
+                launchOnBoot = config.startOnBoot,
+                swipeRefreshEnabled = config.swipeRefresh,
                 // TODO: Move this into a dedicated configuration observer pattern to handle live updates.
                 diagnosticInfo = currentState.diagnosticInfo.copy(
-                    show = config!!.diagnosticsEnabled
+                    show = config.diagnosticsEnabled
                 )
             )
         }
     }
 
     var launchOnBoot: Boolean
-        get() = config!!.startOnBoot
+        get() = config.startOnBoot
         set(value) {
             _vacaState.update { currentState ->
                 currentState.copy(
                     launchOnBoot = value
                 )
             }
-            config!!.startOnBoot = value
+            config.startOnBoot = value
         }
 
     override fun onEventTriggered(event: Event) {
@@ -137,7 +176,7 @@ class VAViewModel: ViewModel(), EventListener {
             else -> consumed = false
         }
         if (consumed) {
-            log.d("ViewModel - Event: ${event.eventName} - ${event.newValue}")
+            Timber.d("ViewModel - Event: ${event.eventName} - ${event.newValue}")
         }
     }
 
@@ -213,22 +252,22 @@ class VAViewModel: ViewModel(), EventListener {
        _vacaState.update { currentState ->
             currentState.copy(
                 appInfo = mapOf(
-                    "Version" to config!!.version,
-                    "IP Address" to (if (Helpers.isNetworkAvailable(config!!.context)) Helpers.getIpv4HostAddress() else ""),
+                    "Version" to config.version,
+                    "IP Address" to (if (Helpers.isNetworkAvailable(config.context)) Helpers.getIpv4HostAddress() else ""),
                     "Port" to APPConfig.SERVER_PORT.toString(),
-                    "UUID" to config!!.uuid,
-                    "Paired to" to config!!.pairedDeviceID,
+                    "UUID" to config.uuid,
+                    "Paired to" to config.pairedDeviceID,
                 )
            )
        }
     }
 
     fun checkForUpdate() {
-        BroadcastSender.sendBroadcast(config!!.context, BroadcastSender.VERSION_MISMATCH)
+        BroadcastSender.sendBroadcast(config.context, BroadcastSender.VERSION_MISMATCH)
     }
 
     fun requestPermissions() {
-        BroadcastSender.sendBroadcast(config!!.context, BroadcastSender.REQUEST_MISSING_PERMISSIONS)
+        BroadcastSender.sendBroadcast(config.context, BroadcastSender.REQUEST_MISSING_PERMISSIONS)
     }
 
     fun setPermissionsStatus(core: Boolean, optional: Boolean) {
@@ -254,10 +293,10 @@ class VAViewModel: ViewModel(), EventListener {
     }
 
     private fun clearPairedDevice() {
-        config!!.pairedDeviceID = ""
-        config!!.accessToken = ""
-        config!!.refreshToken = ""
-        config!!.tokenExpiry = 0
+        config.pairedDeviceID = ""
+        config.accessToken = ""
+        config.refreshToken = ""
+        config.tokenExpiry = 0
     }
 
     fun showUUIDChangeDialog(show: Boolean = true) {
@@ -270,50 +309,18 @@ class VAViewModel: ViewModel(), EventListener {
 
     fun setUUID(uuid: String = "") {
         // TODO: Add validation
-        if (uuid != "" && uuid != config!!.uuid) {
-            config!!.uuid = uuid
+        if (uuid != "" && uuid != config.uuid) {
+            config.uuid = uuid
             showUUIDChangeDialog(false)
             clearPairedDevice()
             buildAppInfo()
-            config!!.eventBroadcaster.notifyEvent(Event("restartZeroconf", "", ""))
+            config.eventBroadcaster.notifyEvent(Event("restartZeroconf", "", ""))
         }
     }
-}
 
-class VADialog(
-    val title: String = "AlertDialog",
-    val message: String = "Message",
-    val confirmText: String = "Yes",
-    val dismissText: String = "No",
-    val confirmCallback: () -> Unit,
-    val dismissCallback: () -> Unit
-) {
-    fun onConfirm() {
-        confirmCallback()
+    fun startSatellite() {
+        viewModelScope.launch {    }
     }
 
-    fun onDismiss() {
-        dismissCallback()
-    }
 }
 
-data class UpdateStatus(
-    var updateAvailable: Boolean = false,
-    var availableVersion: String = "0.0.0"
-)
-
-data class PermissionsStatus(
-    var hasCorePermissions: Boolean = false,
-    var hasOptionalPermissions: Boolean = false
-)
-
-data class DiagnosticInfo(
-    var show: Boolean = false,
-    var engine: String = "",
-    var audioLevel: Float = 0f,
-    var detectionThreshold: Float = 0f,
-    var detectionLevel: Float = 0f,
-    var mode: AudioRouteOption = AudioRouteOption.NONE,
-    var wakeWord: String = "",
-    var vadDetection: Boolean = false
-)

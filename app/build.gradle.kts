@@ -1,10 +1,10 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 //    id("com.google.gms.google-services")
-    id("com.google.firebase.crashlytics")
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
 }
 
 tasks.register("printVersionName") {
@@ -35,14 +35,6 @@ android {
     }
 
     buildTypes {
-        applicationVariants.all {
-            this.outputs
-                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
-                .forEach { output ->
-                    var apkName = "vaca-" + this.versionName + "-" + this.buildType.name + ".apk"
-                    output.outputFileName = apkName
-                }
-        }
         debug {
             isMinifyEnabled = false
         }
@@ -57,17 +49,20 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    kotlin {
-        compilerOptions {
-            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-            optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
-        }
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val name = "vaca-${variant.outputs.first().versionName.get()}-${variant.name}.apk"
+            (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set(name)
+        }
     }
 }
 
@@ -107,6 +102,7 @@ dependencies {
     implementation(libs.litert)
     implementation(libs.protobuf.kotlin)
     implementation(libs.androidx.lifecycle.service)
+    implementation(libs.ktor.network)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     androidTestImplementation(libs.mockk.android)
@@ -121,6 +117,8 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.ui.compose)
-    implementation("com.github.wendykierp:JTransforms:3.2")
+    implementation(libs.jtransforms)
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
 
 }

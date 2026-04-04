@@ -1,6 +1,7 @@
 package com.msp1974.vacompanion.settings
 
 import android.annotation.SuppressLint
+import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
@@ -16,6 +17,7 @@ import com.msp1974.vacompanion.utils.Logger
 import kotlinx.serialization.json.*
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import javax.inject.Inject
 import kotlin.properties.Delegates
 import kotlin.reflect.KProperty
 
@@ -34,7 +36,7 @@ enum class PageLoadingStage {
     AUTH_FAILED,
 }
 
-class APPConfig(val context: Context) {
+class APPConfig @Inject constructor(val context: Context) {
     private val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
     private val log = Logger()
     private val firebase = FirebaseManager.getInstance(context)
@@ -108,7 +110,7 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var continueConversation: Boolean by Delegates.observable(true) { property, oldValue, newValue ->
+    var continueConversation: Boolean by Delegates.observable(false) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -229,6 +231,12 @@ class APPConfig(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    // Status Items
+    var networkConnected: Boolean by Delegates.observable(false) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
+
 
 
 
@@ -283,9 +291,9 @@ class APPConfig(val context: Context) {
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
         settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
         settings["raw_proximity_threshold"]?.jsonPrimitive?.intOrNull?.let { rawProximitySensorThreshold = it }
-        settings["notification_volume"]?.jsonPrimitive?.intOrNull?.let { notificationVolume = it }
-        settings["music_volume"]?.jsonPrimitive?.intOrNull?.let { musicVolume = it }
-        settings["ducking_volume"]?.jsonPrimitive?.intOrNull?.let { duckingVolume = it }
+        settings["notification_volume"]?.jsonPrimitive?.floatOrNull?.let { notificationVolume = it.toInt() }
+        settings["music_volume"]?.jsonPrimitive?.floatOrNull?.let { musicVolume = it.toInt() }
+        settings["ducking_volume"]?.jsonPrimitive?.floatOrNull?.let { duckingVolume = it.toInt() }
         settings["mic_gain"]?.jsonPrimitive?.intOrNull?.let { micGain = it }
         settings["mute"]?.jsonPrimitive?.booleanOrNull?.let { isMuted = it }
         settings["screen_brightness"]?.jsonPrimitive?.floatOrNull?.let { screenBrightness = it / 100 }
@@ -310,6 +318,7 @@ class APPConfig(val context: Context) {
         settings["bump_sensitivity"]?.jsonPrimitive?.floatOrNull?.let { bumpSensitivity = it / 10 }
         settings["screen_saver"]?.jsonPrimitive?.booleanOrNull?.let { screenSaver = it }
         settings["screen_orientation_mode"]?.jsonPrimitive?.contentOrNull?.let { screenOrientationMode = it }
+        settings["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { continueConversation = it }
 
         firebase.addToCrashLog("Settings update")
     }
@@ -368,9 +377,12 @@ class APPConfig(val context: Context) {
         @Volatile
         private var instance: APPConfig? = null
 
+        /*
         fun getInstance(context: Context) =
             instance ?: synchronized(this) {
                 instance ?: APPConfig(context).also { instance = it }
             }
+
+         */
     }
 }

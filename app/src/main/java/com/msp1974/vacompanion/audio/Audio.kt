@@ -1,7 +1,7 @@
 package com.msp1974.vacompanion.audio
 
-import android.content.Context.AUDIO_SERVICE
 import android.content.Context
+import android.content.Context.AUDIO_SERVICE
 import android.media.AudioManager
 import android.os.Handler
 import androidx.core.net.toUri
@@ -13,7 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.min
 
-internal class AudioManager(context: Context) {
+internal class AudioVolumeManager(context: Context) {
     private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
 
     fun getStreamMaxVolume(stream: Int): Int {
@@ -21,7 +21,7 @@ internal class AudioManager(context: Context) {
     }
 
     fun setVolume(stream: Int, volume: Int) {
-        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream) ,volume).toInt(), 0)
+        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream) ,volume), 0)
     }
 
     fun getVolume(stream: Int): Float {
@@ -33,7 +33,7 @@ internal class AudioManager(context: Context) {
  * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
  * to eliminate buffering latency on first playback and ensure immediate audio feedback.
  */
-internal class SoundClipPlayer(private val context: Context) {
+class SoundClipPlayer(private val context: Context) {
     private val players = mutableMapOf<Int, ExoPlayer>()
 
     fun prepare(resId: Int) {

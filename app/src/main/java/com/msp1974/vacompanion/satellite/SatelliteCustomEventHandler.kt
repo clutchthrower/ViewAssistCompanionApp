@@ -1,0 +1,190 @@
+package com.msp1974.vacompanion.satellite
+
+import android.content.Context
+import android.media.AudioManager
+import com.msp1974.vacompanion.R
+import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
+import com.msp1974.vacompanion.device.VolumeManager
+import com.msp1974.vacompanion.utils.Event
+import com.msp1974.vacompanion.utils.EventListener
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import timber.log.Timber
+import javax.inject.Inject
+
+
+class SatelliteCustomEventHandler(
+    val context: Context,
+    val config: APPConfig,
+    val scope: CoroutineScope,
+    val satellite: Satellite
+): EventListener {
+
+    val volumeManager = VolumeManager(context)
+
+    private val serviceStarted = CompletableDeferred<Int>()
+
+    fun run() {
+        scope.launch {
+            start()
+        }
+        Timber.d("Satellite custom event handler started")
+    }
+
+    suspend fun start() {
+        withContext(Dispatchers.Default) {
+            val job = launch {
+                try {
+                    config.eventBroadcaster.addListener(this@SatelliteCustomEventHandler)
+                    awaitCancellation()
+                } finally {
+                    config.eventBroadcaster.removeListener(this@SatelliteCustomEventHandler)
+                }
+            }
+            serviceStarted.await()
+            job.cancel()
+            Timber.d("Satellite custom event handler stopped")
+        }
+    }
+
+    fun stop() {
+        serviceStarted.complete(0)
+    }
+
+    override fun onEventTriggered(event: Event) {
+        var consumed = true
+        if (event.eventName != "diagnosticStats") {
+            Timber.d("Satellite custom event handler received event: ${event.eventName} - ${event.newValue}")
+        }
+        when (event.eventName) {
+            "isMuted" -> {
+                try {
+                    satellite.muteMicrophone(event.newValue as Boolean)
+                    satellite.sendDiagnostics(0f,0f)
+                } catch (e: Exception) {
+                    Timber.e("Error setting muted: ${e.message.toString()}")
+                }
+            }
+            "notificationVolume" -> {
+                if (!DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)) {
+                    volumeManager.setVolume(AudioManager.STREAM_NOTIFICATION, event.newValue as Int)
+                }
+            }
+            "musicVolume" -> {
+                //setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
+            }
+            "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
+                scope.launch {
+                    satellite.startWakeWordDetection()
+                }
+            }
+            "wakeWordTrigger" -> {
+                satellite.handleWakeWordDetection()
+            }
+            "recognitionError" -> {
+                val errorText = event.oldValue as? String ?: ""
+                if (errorText.isNotEmpty()) {
+                    config.eventBroadcaster.notifyEvent(Event("showToastError", "", errorText))
+                }
+
+                if (config.wakeWordSound != "none") {
+                    try {
+                        satellite.soundClipPlayer.play(R.raw.error)
+                    } catch (e: Exception) {
+                        Timber.e("Error playing wake word sound: ${e.message.toString()}")
+                    }
+                }
+                //audioRoute = AudioRouteOption.DETECT
+                satellite.sendDiagnostics(0f, 0f)
+            }
+            "doNotDisturb" -> {
+                //setDoNotDisturb(event.newValue as Boolean)
+                satellite.sendSetting("do_not_disturb", event.newValue)
+            }
+            "screenSaver" -> {
+                satellite.sendSetting("screen_saver", event.newValue)
+            }
+            /*
+            "restartZeroconf" -> {
+                zeroConf.unregisterService()
+                scope.launch {
+                    delay(2000)
+                    zeroConf.registerService(config.serverPort)
+                }
+            }
+
+            "pairedDeviceID" -> {
+                if (config.pairedDeviceID != "") {
+                    Timber.d("Device paired, stopping Zeroconf")
+                    zeroConf.unregisterService()
+                } else {
+                    Timber.d("Device unpaired, starting Zeroconf")
+                    zeroConf.registerService(config.serverPort)
+                }
+            }
+
+             */
+            "currentPath" -> {
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("sensors", {
+                            put("current_path", event.newValue.toString())
+                        })
+                    }
+                )
+            }
+            "screenOn" -> {
+                val state = event.newValue as Boolean
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("sensors", {
+                            put("screen_on", state)
+                        })
+                    }
+                )
+            }
+            "enableMotionDetection" -> {
+                val state = event.newValue as Boolean
+                if (state) {
+                    satellite.motionTask.startCamera()
+                } else {
+                    satellite.motionTask.stopCamera()
+                }
+            }
+            "lastMotion" -> {
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("sensors", {
+                            put("motion_detected", true)
+                            put("last_motion", config.lastMotion)
+                        })
+                    }
+                )
+            }
+            "lastActivity" -> {
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("sensors", {
+                            put("last_activity", config.lastActivity)
+                        })
+                    }
+                )
+            }
+            "motionDetectionSensitivity" -> {
+                satellite.motionTask.setSensitivity(event.newValue as Int)
+            }
+            else -> consumed = false
+        }
+        if (consumed) {
+            Timber.d("BackgroundTask - Event: ${event.eventName} - ${event.newValue}")
+        }
+    }
+}

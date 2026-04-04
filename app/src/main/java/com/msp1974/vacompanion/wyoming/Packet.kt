@@ -22,4 +22,26 @@ data class WyomingPacket (
     fun toMap(): Map<String, Any> {
         return mapOf("type" to type, "data" to data)
     }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as WyomingPacket
+
+        if (sessionId != other.sessionId) return false
+        if (type != other.type) return false
+        if (data != other.data) return false
+        if (!payload.contentEquals(other.payload)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = sessionId ?: 0
+        result = 31 * result + type.hashCode()
+        result = 31 * result + data.hashCode()
+        result = 31 * result + payload.contentHashCode()
+        return result
+    }
 }
