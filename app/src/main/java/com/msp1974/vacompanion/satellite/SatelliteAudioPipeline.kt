@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,6 +61,7 @@ abstract class SatelliteAudioPipeline(
 ): IAudioPipeline {
 
     private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
+    private var audioMessageQueue = Channel<WyomingPacket>(capacity = Channel.UNLIMITED)
     private var result: PipelineEndReason = PipelineEndReason.NONE
     var pipelineStage = PipelineStage.INIT
         set(value) {
@@ -75,40 +77,38 @@ abstract class SatelliteAudioPipeline(
 
 
     suspend fun start(sendDetection: Boolean = false) {
-        withContext(Dispatchers.Default) {
-            val job = scope.launch {
-                try {
-                    pipelineStage = PipelineStage.STARTING
-                    if (sendDetection) {
-                        Timber.d("Sending detection event")
-                        sendMessage(buildDetectionMessage())
+        val job = scope.launch(Dispatchers.Default) {
+            try {
+                pipelineStage = PipelineStage.STARTING
+                if (sendDetection) {
+                    Timber.d("Sending detection event")
+                    sendMessage(buildDetectionMessage())
+                }
+                Timber.d("Starting pipeline [$pipelineId]")
+                sendMessage(buildRunPipelineMessage())
+                pipelineStage = PipelineStage.STARTED
+                audioMessageHandler()
+                awaitCancellation()
+            } finally {
+                //TODO: Change to audio stop
+                withContext(NonCancellable) {
+                    val msg = when (result) {
+                        PipelineEndReason.END_OF_PIPELINE -> { "Pipeline ended normally" }
+                        PipelineEndReason.FORCE_STOPPED -> { "Pipeline was terminated" }
+                        PipelineEndReason.ERRORED -> { "Pipeline ended with an error" }
+                        PipelineEndReason.TIMED_OUT -> { "Pipeline timed out at stage: $pipelineStage" }
+                        PipelineEndReason.DUPLICATE_WAKEUP -> { "Pipeline ended due to duplicate wake up" }
+                        else -> { "Pipeline ended for unknown reason" }
                     }
-                    Timber.d("Starting pipeline [$pipelineId]")
-                    sendMessage(buildRunPipelineMessage())
-                    pipelineStage = PipelineStage.STARTED
-                    awaitCancellation()
-                } finally {
-                    //TODO: Change to audio stop
-                    withContext(NonCancellable) {
-                        val msg = when (result) {
-
-                            PipelineEndReason.END_OF_PIPELINE -> { "Pipeline ended normally" }
-                            PipelineEndReason.FORCE_STOPPED -> { "Pipeline was terminated" }
-                            PipelineEndReason.ERRORED -> { "Pipeline ended with an error" }
-                            PipelineEndReason.TIMED_OUT -> { "Pipeline timed out at stage: $pipelineStage" }
-                            PipelineEndReason.DUPLICATE_WAKEUP -> { "Pipeline ended due to duplicate wake up" }
-                            else -> { "Pipeline ended for unknown reason" }
-                        }
-                        Timber.d("$msg [$pipelineId]")
-                        onFinish(result)
-                        pipelineStage = PipelineStage.ENDED
-                    }
+                    Timber.d("$msg [$pipelineId]")
+                    onFinish(result)
+                    pipelineStage = PipelineStage.ENDED
                 }
             }
-            result = pipelineRunning.await()
-            job.cancel()
-            Timber.d("Pipeline stopped [$pipelineId] -> $result.")
         }
+        result = pipelineRunning.await()
+        job.cancel()
+        Timber.d("Pipeline stopped [$pipelineId] -> $result.")
     }
 
     fun stop() {
@@ -124,12 +124,32 @@ abstract class SatelliteAudioPipeline(
             "voice-stopped" -> handleVoiceStopped()
             "transcript" -> handleTranscript(packet)
             "synthesize" -> handleSynthesize(packet)
-            "audio-start" -> handleAudioStart()
-            "audio-chunk" -> handleAudioChunk(packet)
-            "audio-stop" -> handleAudioStop()
+            "audio-start", "audio-chunk", "audio-stop" -> audioMessageQueue.send(packet)
             "pipeline-ended" -> handlePipelineEnded()
             "error" -> handlePipelineError(packet)
         }
+    }
+
+    private suspend fun audioMessageHandler() {
+        val job = scope.launch(Dispatchers.IO) {
+            Timber.d("Audio message handler started.")
+            try {
+                while (true) {
+                    val msg = audioMessageQueue.receive()
+                    when (msg.type) {
+                        "audio-start" -> handleAudioStart()
+                        "audio-chunk" -> handleAudioChunk(msg)
+                        "audio-stop" -> handleAudioStop()
+                    }
+                }
+            } finally {
+                audioMessageQueue.close()
+            }
+        }
+        result = pipelineRunning.await()
+        job.cancel()
+        Timber.d("Audio message handler stopped.")
+
     }
 
     fun sendMicAudio(audio: ByteArray): Boolean {
