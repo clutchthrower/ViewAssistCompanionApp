@@ -13,22 +13,6 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlin.math.min
 
-internal class AudioVolumeManager(context: Context) {
-    private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
-
-    fun getStreamMaxVolume(stream: Int): Int {
-        return audioManager.getStreamMaxVolume(stream)
-    }
-
-    fun setVolume(stream: Int, volume: Int) {
-        audioManager.setStreamVolume(stream, min(getStreamMaxVolume(stream) ,volume), 0)
-    }
-
-    fun getVolume(stream: Int): Float {
-        return audioManager.getStreamVolume(stream).toFloat() / getStreamMaxVolume(stream).toFloat()
-    }
-}
-
 /**
  * Manages playback of short sound effects. Uses a pool of pre-prepared ExoPlayer instances 
  * to eliminate buffering latency on first playback and ensure immediate audio feedback.

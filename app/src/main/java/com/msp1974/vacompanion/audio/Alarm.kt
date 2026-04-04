@@ -5,14 +5,10 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.Logger
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import kotlin.concurrent.thread
 import androidx.core.net.toUri
-import com.msp1974.vacompanion.device.VAAudioManager
-import timber.log.Timber
-import javax.inject.Inject
+
 
 
 class Alarm(val context: Context, val config: APPConfig) {

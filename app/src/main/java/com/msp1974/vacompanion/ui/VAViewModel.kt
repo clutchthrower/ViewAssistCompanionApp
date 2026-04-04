@@ -52,6 +52,7 @@ data class PermissionsStatus(
 data class DiagnosticInfo(
     var show: Boolean = false,
     var engine: String = "",
+    var muted: Boolean = false,
     var audioLevel: Float = 0f,
     var detectionThreshold: Float = 0f,
     var detectionLevel: Float = 0f,
@@ -112,7 +113,9 @@ class VAViewModel @Inject constructor(
                 swipeRefreshEnabled = config.swipeRefresh,
                 // TODO: Move this into a dedicated configuration observer pattern to handle live updates.
                 diagnosticInfo = currentState.diagnosticInfo.copy(
-                    show = config.diagnosticsEnabled
+                    show = config.diagnosticsEnabled,
+                    engine = config.wakeWordEngine,
+                    muted = config.isMuted,
                 )
             )
         }
@@ -132,6 +135,38 @@ class VAViewModel @Inject constructor(
     override fun onEventTriggered(event: Event) {
         var consumed = true
         when (event.eventName) {
+            "isMuted" -> {
+                val isMuted = event.newValue as Boolean
+                _vacaState.update { currentState ->
+                    currentState.copy(
+                        diagnosticInfo = currentState.diagnosticInfo.copy(
+                            muted = isMuted,
+                            audioLevel = 0f,
+                            detectionLevel = 0f,
+                            mode = if (isMuted || config.wakeWord == "none") AudioRouteOption.NONE else AudioRouteOption.DETECT
+                        )
+                    )
+                }
+            }
+            "wakeWord" -> {
+                _vacaState.update { currentState ->
+                    val wakeWord = event.newValue as String
+                    currentState.copy(
+                        diagnosticInfo = currentState.diagnosticInfo.copy(
+                            wakeWord = wakeWord,
+                        )
+                    )
+                }
+            }
+            "wakeWordEngine" -> {
+                _vacaState.update { currentState ->
+                    currentState.copy(
+                        diagnosticInfo = currentState.diagnosticInfo.copy(
+                            engine = event.newValue as String
+                        )
+                    )
+                }
+            }
             "pairedDeviceID" -> buildAppInfo()
             "darkMode" -> {
                 _vacaState.update { currentState ->

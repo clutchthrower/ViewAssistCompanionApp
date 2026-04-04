@@ -47,7 +47,7 @@ class VolumeObserver(
     }
 }
 
-internal class VAAudioManager(context: Context) {
+internal class AudioVolumeManager(context: Context) {
     private val audioManager = context.getSystemService(AUDIO_SERVICE) as AudioManager
 
     fun getStreamMaxVolume(stream: Int): Int {
@@ -71,7 +71,7 @@ class VolumeManager(val context: Context) {
 
     fun setVolume(stream: Int, volume: Int) {
         try {
-            val audioManager = VAAudioManager(context)
+            val audioManager = AudioVolumeManager(context)
             audioManager.setVolume(stream, volume)
             Timber.d("Set volume $stream to $volume")
         } catch (e: Exception) {

@@ -241,6 +241,11 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
     }
 
+    suspend fun restartWakeWordDetection() {
+        stopWakeWordDetection()
+        startWakeWordDetection()
+    }
+
     fun handleWakeWordDetection() {
         var startNewPipeline = audioPipeline == null || audioPipeline?.pipelineStage == PipelineStage.ENDED
 
@@ -310,7 +315,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
 
     fun muteMicrophone(muted: Boolean) {
-        wakeWordHandler?.engine!!.setMuted(muted)
+        runCatching {
+            wakeWordHandler?.engine!!.setMuted(muted)
+        }
     }
 
     fun stopWakeWordDetection() {

@@ -68,7 +68,6 @@ class SatelliteCustomEventHandler(
             "isMuted" -> {
                 try {
                     satellite.muteMicrophone(event.newValue as Boolean)
-                    satellite.sendDiagnostics(0f,0f)
                 } catch (e: Exception) {
                     Timber.e("Error setting muted: ${e.message.toString()}")
                 }
@@ -79,11 +78,11 @@ class SatelliteCustomEventHandler(
                 }
             }
             "musicVolume" -> {
-                //setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
+                volumeManager.setVolume(AudioManager.STREAM_MUSIC, event.newValue as Int)
             }
             "wakeWord", "wakeWordSound", "wakeWordThreshold", "wakeWordEngine", "useVoiceEnhancer", "useAdvancedGain" -> {
                 scope.launch {
-                    satellite.startWakeWordDetection()
+                    satellite.restartWakeWordDetection()
                 }
             }
             "wakeWordTrigger" -> {
@@ -106,32 +105,12 @@ class SatelliteCustomEventHandler(
                 satellite.sendDiagnostics(0f, 0f)
             }
             "doNotDisturb" -> {
-                //setDoNotDisturb(event.newValue as Boolean)
+                volumeManager.setDoNotDisturb(event.newValue as Boolean)
                 satellite.sendSetting("do_not_disturb", event.newValue)
             }
             "screenSaver" -> {
                 satellite.sendSetting("screen_saver", event.newValue)
             }
-            /*
-            "restartZeroconf" -> {
-                zeroConf.unregisterService()
-                scope.launch {
-                    delay(2000)
-                    zeroConf.registerService(config.serverPort)
-                }
-            }
-
-            "pairedDeviceID" -> {
-                if (config.pairedDeviceID != "") {
-                    Timber.d("Device paired, stopping Zeroconf")
-                    zeroConf.unregisterService()
-                } else {
-                    Timber.d("Device unpaired, starting Zeroconf")
-                    zeroConf.registerService(config.serverPort)
-                }
-            }
-
-             */
             "currentPath" -> {
                 satellite.sendStatus(
                     buildJsonObject {
@@ -184,7 +163,7 @@ class SatelliteCustomEventHandler(
             else -> consumed = false
         }
         if (consumed) {
-            Timber.d("BackgroundTask - Event: ${event.eventName} - ${event.newValue}")
+            Timber.d("Event: ${event.eventName} - ${event.newValue}")
         }
     }
 }
