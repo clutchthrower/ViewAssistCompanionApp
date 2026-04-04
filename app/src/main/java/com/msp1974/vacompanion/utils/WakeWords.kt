@@ -2,8 +2,8 @@ package com.msp1974.vacompanion.utils
 
 import android.content.Context
 import android.os.Environment
-import com.msp1974.vacompanion.utils.AuthUtils.Companion.log
 import com.msp1974.vacompanion.wakeword.WakeWord
+import timber.log.Timber
 import kotlin.io.path.Path
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.forEachDirectoryEntry
@@ -28,9 +28,9 @@ class WakeWords(val context: Context) {
         val vacaFilesDir = Path(context.filesDir.toString(), path)
 
         if (vacaDownloadDir.isDirectory()) {
-            log.d("Custom wake words directory found in Downloads - ${vacaDownloadDir.toFile().absolutePath}")
+            Timber.d("Custom wake words directory found in Downloads - ${vacaDownloadDir.toFile().absolutePath}")
             vacaDownloadDir.forEachDirectoryEntry( "*.onnx", { entry ->
-                log.d("Found custom wake word: ${entry.fileName}")
+                Timber.d("Found custom wake word: ${entry.fileName}")
                 val key = entry.fileName.toString().replace(".onnx", "").lowercase()
                 val name = key.replace("_", " ")
 
@@ -39,9 +39,9 @@ class WakeWords(val context: Context) {
         }
 
         if (vacaFilesDir.isDirectory()) {
-            log.d("Custom wake words directory found in App files - ${vacaFilesDir.toFile().absolutePath}")
+            Timber.d("Custom wake words directory found in App files - ${vacaFilesDir.toFile().absolutePath}")
             vacaFilesDir.forEachDirectoryEntry( "*.onnx", { entry ->
-                log.d("Found custom wake word: ${entry.fileName}")
+                Timber.d("Found custom wake word: ${entry.fileName}")
                 val key = entry.fileName.toString().replace(".onnx", "").lowercase()
                 val name = key.replace("_", " ")
 
