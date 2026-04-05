@@ -42,18 +42,18 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 interface ISatelliteEvent {
     fun onEvent(event: String, data: JsonObject)
     fun sendSatelliteMessage(clientId: String, type: String, data: JsonObject, payload: ByteArray = ByteArray(0))
 }
 
-enum class AudioRouteOption { NONE, DETECT, PROCESS_NO_DETECT, STREAM}
+enum class AudioRouteOption { NONE, DETECT, STREAM}
 
 
 abstract class Satellite(var context: Context, val config: APPConfig, val scope: CoroutineScope, clientIdString: String, val deviceInfo: DeviceCapabilitiesData): ISatelliteEvent {
-
-    private val firebase = FirebaseManager.getInstance(context)
 
     private val json = Json { ignoreUnknownKeys = true }
     var clientId = clientIdString
@@ -74,7 +74,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private var audioPipelineLastStateChange = System.currentTimeMillis()
 
 
-    private var continueConversation: Boolean = false
+    @OptIn(ExperimentalAtomicApi::class)
+    private var continueConversation = AtomicBoolean(false)
 
     var state: SatelliteState = SatelliteState.STOPPED
     private var volumeObserver: VolumeObserver? = null
@@ -184,6 +185,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
     }
 
+    @OptIn(ExperimentalAtomicApi::class)
     suspend fun startWakeWordDetection() {
         if (wakeWordHandler != null) {
             wakeWordHandler?.stop()
@@ -216,7 +218,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
             override suspend fun onStopWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
                 if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
-                    continueConversation = false
+                    continueConversation.store(false)
                     audioPipeline?.stop()
                     audioPipeline = null
                 }
@@ -325,12 +327,13 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
 
 
+    @OptIn(ExperimentalAtomicApi::class)
     fun startAudioPipeline(continuation: Boolean) {
         if (audioPipeline != null) {
             audioPipeline?.stop()
             audioPipeline = null
         }
-        continueConversation = config.continueConversation
+        continueConversation.store(config.continueConversation)
         val pipelineId = audioPipelineId.getAndAdd(1)
         audioPipeline = object: SatelliteAudioPipeline(context, scope, config, pipelineId, mediaManager, isContinuation = continuation) {
             override fun sendMessage(packet: WyomingPacket) {
@@ -347,7 +350,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                     }
                     PipelineStage.VOICE_STOPPED -> { wakeWordHandler?.engine!!.setStreaming(false) }
                     PipelineStage.ENDED -> {
-                        if (continueConversation) {
+                        if (continueConversation.load()) {
                             startAudioPipeline(continuation = true)
                         } else {
                             handleVolumeDucking("all", false)
@@ -359,7 +362,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
             override fun onFinish(reason: PipelineEndReason) {
                 if (reason != PipelineEndReason.END_OF_PIPELINE) {
-                    continueConversation = false
+                    continueConversation.store(false)
                 }
                 if (reason == PipelineEndReason.ERRORED && config.wakeWordSound != "none") {
                     playErrorSound()
@@ -401,20 +404,22 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
     }
 
+    @OptIn(ExperimentalAtomicApi::class)
     private suspend fun handleAction(action: String, packet: WyomingPacket) {
         Timber.d("Action received: $action")
         runCatching {
             val payloadStr = packet.getProp("payload")
             when (action) {
                 "intent-output" -> {
-                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.AWAITING_RESPONSE && !continueConversation) {
+                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.AWAITING_RESPONSE && !continueConversation.load()) {
                         if (packet.getProp("data") != "") {
                             val data = json.parseToJsonElement(packet.getProp("data")).jsonObject
                             val intentOutput = data.get("intent_output")?.jsonObject
                             if (intentOutput != null) {
-                                continueConversation =
+                                continueConversation.store(
                                     intentOutput["continue_conversation"]?.jsonPrimitive?.boolean
                                         ?: config.continueConversation
+                                )
                             }
                             Timber.d("Continue conversation: $continueConversation")
                         }
