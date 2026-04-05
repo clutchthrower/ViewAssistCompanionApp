@@ -114,16 +114,27 @@ abstract class SatelliteWakeWorkHandler(val context: Context, val config: APPCon
         }
     }
 
-    fun stop() {
+    suspend fun stop() {
         if (wakeWordJob != null && wakeWordJob!!.isActive) {
             state = WakeWordHandlerState.STOPPING
             wakeWordJob?.cancel()
             wakeWordJob = null
         }
-        engine = null
-        onDiagnostics(0f, 0f)
-        state = WakeWordHandlerState.STOPPED
-        Timber.d("Wake word detection stopped")
+
+        try {
+            withTimeout(200L) {
+                withContext(Dispatchers.Default) {
+                    while (state != WakeWordHandlerState.STOPPED) {
+                        delay(10)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+        } finally {
+            engine = null
+            onDiagnostics(0f, 0f)
+            Timber.d("Wake word detection stopped")
+        }
     }
 
 
@@ -155,7 +166,7 @@ abstract class SatelliteWakeWorkHandler(val context: Context, val config: APPCon
 
                 is WakeWordEngineProvider.AudioResult.StopDetected -> {
                     if (it.detection.detected) {
-                        Timber.d("Stop word detected: ${it.detection.wakeWord}")
+                        Timber.d("Stop word detected: score: ${it.detection.score}")
                         if (it.detection.score > 0.5) {
                             onStopWordDetected(it.detection)
                             BroadcastSender.sendBroadcast(
@@ -191,6 +202,8 @@ abstract class SatelliteWakeWorkHandler(val context: Context, val config: APPCon
                     Timber.i("Engine status: ${it.status}")
                     if (it.status == "Started") {
                         state = WakeWordHandlerState.RUNNING
+                    } else if (it.status == "Stopped") {
+                        state = WakeWordHandlerState.STOPPED
                     }
                 }
 

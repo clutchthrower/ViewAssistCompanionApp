@@ -61,9 +61,6 @@ class SatelliteCustomEventHandler(
 
     override fun onEventTriggered(event: Event) {
         var consumed = true
-        if (event.eventName != "diagnosticStats") {
-            Timber.d("Satellite custom event handler received event: ${event.eventName} - ${event.newValue}")
-        }
         when (event.eventName) {
             "isMuted" -> {
                 try {
