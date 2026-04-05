@@ -1,4 +1,4 @@
-package com.msp1974.vacompanion.wyoming
+package com.msp1974.vacompanion.satellite
 
 import android.content.Context
 import com.msp1974.vacompanion.audio.Alarm
@@ -6,7 +6,7 @@ import com.msp1974.vacompanion.audio.PCMMediaPlayer
 import com.msp1974.vacompanion.audio.VAMediaPlayer
 import com.msp1974.vacompanion.settings.APPConfig
 
-class WyomingMediaManager(private val context: Context, val config: APPConfig) {
+class SatelliteMediaManager(private val context: Context, val config: APPConfig) {
     val alarmPlayer = Alarm(context, config)
     val pcmMediaPlayer = PCMMediaPlayer(context)
     val musicPlayer = VAMediaPlayer.Companion.getInstance(context, config)

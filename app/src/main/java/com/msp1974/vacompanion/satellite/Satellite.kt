@@ -2,7 +2,6 @@ package com.msp1974.vacompanion.satellite
 
 import android.content.Context
 import com.msp1974.vacompanion.R
-import com.msp1974.vacompanion.audio.Alarm
 import com.msp1974.vacompanion.audio.SoundClipPlayer
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.device.Camera
@@ -19,14 +18,9 @@ import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wyoming.SatelliteState
-import com.msp1974.vacompanion.wyoming.WyomingMediaManager
 import com.msp1974.vacompanion.wyoming.WyomingPacket
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,7 +32,6 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -49,7 +42,6 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
-import javax.inject.Inject
 
 interface ISatelliteEvent {
     fun onEvent(event: String, data: JsonObject)
@@ -65,7 +57,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     private val json = Json { ignoreUnknownKeys = true }
     var clientId = clientIdString
-    private val mediaManager: WyomingMediaManager = WyomingMediaManager(context, config)
+    private val mediaManager: SatelliteMediaManager = SatelliteMediaManager(context, config)
     val soundClipPlayer = SoundClipPlayer(context)
 
 

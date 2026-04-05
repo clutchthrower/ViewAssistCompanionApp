@@ -4,7 +4,6 @@ import android.content.Context
 import com.msp1974.vacompanion.satellite.Satellite.Companion.isoNow
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Event
-import com.msp1974.vacompanion.wyoming.WyomingMediaManager
 import com.msp1974.vacompanion.wyoming.WyomingPacket
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -55,7 +54,7 @@ abstract class SatelliteAudioPipeline(
     val scope: CoroutineScope,
     val config: APPConfig,
     val pipelineId: Int,
-    val mediaManager: WyomingMediaManager,
+    val mediaManager: SatelliteMediaManager,
     val isContinuation: Boolean = false
 ): IAudioPipeline {
 
