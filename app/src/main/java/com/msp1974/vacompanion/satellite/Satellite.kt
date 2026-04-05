@@ -13,6 +13,7 @@ import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.ui.DiagnosticInfo
 import com.msp1974.vacompanion.device.DeviceCapabilitiesData
 import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
+import com.msp1974.vacompanion.device.ScreenUtils
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Helpers
@@ -25,6 +26,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,10 +117,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 sendSetting("notification_volume", notificationVolume)
             }
         }
-
-        // Set state from device
-        config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
-
         volumeObserver?.register()
 
         val startTime = System.currentTimeMillis()
@@ -128,6 +126,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             startWakeWordDetection()
             eventHandler.run()
         }.join()
+
+        sendDeviceStates()
 
         Timber.d("Satellite started in ${System.currentTimeMillis() - startTime}ms")
 
@@ -150,6 +150,12 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             Timber.e("Error waiting for settings: ${e.message.toString()}")
             return false
         }
+    }
+
+    suspend fun sendDeviceStates() {
+        config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
+        config.screenOn = ScreenUtils(context, config).isScreenOn()
+
     }
 
 
@@ -209,17 +215,15 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
             override suspend fun onWakeWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
                 Timber.d("Wake word detected: $detection")
-
-                if (mediaManager.alarmPlayer.isSounding()) {
-                    handleAlarmAction(false, "")
-                    return
+                if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
+                    onStopWordDetected(detection)
+                } else {
+                    handleWakeWordDetection()
                 }
-
-                handleWakeWordDetection()
             }
 
             override suspend fun onStopWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
-                if (audioPipeline != null) {
+                if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
                     continueConversation = false
                     audioPipeline?.stop()
                     audioPipeline = null
@@ -240,6 +244,12 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             it.run()
         }
     }
+
+    suspend fun stopWakeWordDetection() {
+        wakeWordHandler?.stop()
+        wakeWordHandler = null
+    }
+
 
     suspend fun restartWakeWordDetection() {
         stopWakeWordDetection()
@@ -274,7 +284,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
             }
 
-            startAudioPipeline()
+            startAudioPipeline(continuation = false)
             playWakeWordDetectionSound()
         }
     }
@@ -320,19 +330,17 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
     }
 
-    fun stopWakeWordDetection() {
-        wakeWordHandler?.stop()
-        wakeWordHandler = null
-    }
 
 
-    fun startAudioPipeline() {
+
+    fun startAudioPipeline(continuation: Boolean) {
         if (audioPipeline != null) {
             audioPipeline?.stop()
             audioPipeline = null
         }
+        continueConversation = config.continueConversation
         val pipelineId = audioPipelineId.getAndAdd(1)
-        audioPipeline = object: SatelliteAudioPipeline(context, scope, config, pipelineId, mediaManager) {
+        audioPipeline = object: SatelliteAudioPipeline(context, scope, config, pipelineId, mediaManager, isContinuation = continuation) {
             override fun sendMessage(packet: WyomingPacket) {
                 sendSatelliteMessage(clientId, packet.type, packet.data, packet.payload)
             }
@@ -348,7 +356,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                     PipelineStage.VOICE_STOPPED -> { wakeWordHandler?.engine!!.setStreaming(false) }
                     PipelineStage.ENDED -> {
                         if (continueConversation) {
-                            startAudioPipeline()
+                            startAudioPipeline(continuation = true)
                         } else {
                             handleVolumeDucking("all", false)
                         }
@@ -358,6 +366,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             }
 
             override fun onFinish(reason: PipelineEndReason) {
+                if (reason != PipelineEndReason.END_OF_PIPELINE) {
+                    continueConversation = false
+                }
                 if (reason == PipelineEndReason.ERRORED && config.wakeWordSound != "none") {
                     playErrorSound()
                 }
@@ -404,7 +415,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             val payloadStr = packet.getProp("payload")
             when (action) {
                 "intent-output" -> {
-                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.AWAITING_RESPONSE) {
+                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.AWAITING_RESPONSE && !continueConversation) {
                         if (packet.getProp("data") != "") {
                             val data = json.parseToJsonElement(packet.getProp("data")).jsonObject
                             val intentOutput = data.get("intent_output")?.jsonObject

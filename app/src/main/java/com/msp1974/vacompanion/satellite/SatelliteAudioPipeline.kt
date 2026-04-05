@@ -10,7 +10,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -22,7 +21,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import timber.log.Timber
-import javax.inject.Inject
 
 enum class PipelineStage {
     INIT,
@@ -57,8 +55,13 @@ abstract class SatelliteAudioPipeline(
     val scope: CoroutineScope,
     val config: APPConfig,
     val pipelineId: Int,
-    val mediaManager: WyomingMediaManager
+    val mediaManager: WyomingMediaManager,
+    val isContinuation: Boolean = false
 ): IAudioPipeline {
+
+    companion object {
+        val CONTINUATION_STOP_WORDS = listOf("stop", "cancel", "never mind")
+    }
 
     private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
     private var audioMessageQueue = Channel<WyomingPacket>(capacity = 200)
@@ -122,7 +125,7 @@ abstract class SatelliteAudioPipeline(
             "transcribe" -> handleTranscribe()
             "voice-started" -> handleVoiceStarted()
             "voice-stopped" -> handleVoiceStopped()
-            "transcript" -> handleTranscript()
+            "transcript" -> handleTranscript(packet)
             "synthesize" -> handleSynthesize()
             "audio-start", "audio-chunk", "audio-stop" -> queueAudioMessage(packet)
             "pipeline-ended" -> handlePipelineEnded()
@@ -177,7 +180,12 @@ abstract class SatelliteAudioPipeline(
         pipelineStage = PipelineStage.VOICE_STOPPED
     }
 
-    internal fun handleTranscript() {
+    internal fun handleTranscript(packet: WyomingPacket) {
+        // Handle pipeline cancel words
+        if (isContinuation && packet.getProp("text").lowercase().replace(".", "") in CONTINUATION_STOP_WORDS) {
+            stop()
+            return
+        }
         pipelineStage = PipelineStage.AWAITING_RESPONSE
     }
 
