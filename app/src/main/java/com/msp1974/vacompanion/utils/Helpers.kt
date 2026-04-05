@@ -59,9 +59,5 @@ class Helpers {
             var dotOccurred = 0
             return input.all { it in integerChars || it == '.' && dotOccurred++ < 1 }
         }
-
-        fun isAndroidThings(context: Context): Boolean {
-            return context.packageManager.hasSystemFeature("android.hardware.type.embedded")
-        }
     }
 }

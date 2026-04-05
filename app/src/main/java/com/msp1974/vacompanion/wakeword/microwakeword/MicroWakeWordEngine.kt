@@ -9,6 +9,7 @@ import com.msp1974.vacompanion.wakeword.microwakeword.models.WakeWordWithId
 import com.google.protobuf.ByteString
 import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -63,7 +64,9 @@ open class MicroWakeWordEngine (
         // Stop microphone when muted
         if (it) emptyFlow()
         else flow {
-            val microphoneInput = MicrophoneInput()
+            val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
+            val audioSource = if(isEmbedded) MicrophoneInput.FALLBACK_AUDIO_SOURCE else MicrophoneInput.DEFAULT_AUDIO_SOURCE
+            val microphoneInput = MicrophoneInput(audioSource)
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value
             var detector = createDetector(wakeWords, stopWords)

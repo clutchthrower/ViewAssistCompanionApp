@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Context.NOTIFICATION_SERVICE
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.camera2.CameraAccessException
@@ -158,6 +159,18 @@ class DeviceCapabilitiesManager(val context: Context, val config: APPConfig) {
             return false
         }
         return false
+    }
+
+    fun hasMicrophone(): Boolean {
+        return context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)
+    }
+
+    fun isAndroidThings(): Boolean {
+        return context.packageManager.hasSystemFeature("android.hardware.type.embedded")
+    }
+
+    fun getProperty(name: String): String? {
+        return System.getProperty(name)
     }
 
     fun hasDND(): Boolean {

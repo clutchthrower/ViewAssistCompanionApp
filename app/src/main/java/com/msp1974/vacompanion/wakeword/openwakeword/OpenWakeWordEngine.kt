@@ -8,6 +8,7 @@ import androidx.annotation.RequiresPermission
 import com.google.protobuf.ByteString
 import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wakeword.openwakeword.audio.AudioProcessor
@@ -140,7 +141,9 @@ class OpenWakeWordEngine(
     override fun start() = muted.flatMapLatest {
         if (it) emptyFlow()
         else flow {
-            val microphoneInput = MicrophoneInput(frameSize = 1280)
+            val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
+            val audioSource = if(isEmbedded) MicrophoneInput.FALLBACK_AUDIO_SOURCE else MicrophoneInput.DEFAULT_AUDIO_SOURCE
+            val microphoneInput = MicrophoneInput(audioSource, frameSize = 1280)
             try {
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))
