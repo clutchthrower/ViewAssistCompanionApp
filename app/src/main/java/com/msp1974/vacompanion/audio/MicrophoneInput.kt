@@ -24,9 +24,6 @@ class MicrophoneInput(
     private var audioRecord: AudioRecord? = null
 
     private var aec: AcousticEchoCanceler? = null
-    private var agc: AutomaticGainControl? = null
-    private var ns: NoiseSuppressor? = null
-
     private var audioDSP = AudioDSP()
 
     val isRecording get() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
@@ -40,7 +37,7 @@ class MicrophoneInput(
         }
 
         if (!isRecording) {
-            Timber.d("Starting microphone with AEC=${aec != null}, AGC=${agc != null}, NS=${ns != null}")
+            Timber.d("Starting microphone with AEC=${aec != null}")
             audioRecord?.startRecording()
         } else {
             Timber.w("Microphone already started")
@@ -102,26 +99,12 @@ class MicrophoneInput(
             aec = AcousticEchoCanceler.create(sessionId)
             aec?.enabled = true
         } catch (e: Exception) {}
-
-        try {
-            agc = AutomaticGainControl.create(sessionId)
-            agc?.enabled = true
-        } catch (e: Exception) {}
-
-        try {
-            ns = NoiseSuppressor.create(sessionId)
-            ns?.enabled = true
-        } catch (e: Exception) {}
     }
 
 
     override fun close() {
         aec?.release()
         aec = null
-        agc?.release()
-        agc = null
-        ns?.release()
-        ns = null
 
         audioRecord?.let {
             if (isRecording) {
