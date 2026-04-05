@@ -6,6 +6,8 @@ import android.media.AudioManager
 import com.msp1974.vacompanion.settings.APPConfig
 import timber.log.Timber
 import androidx.core.net.toUri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import com.msp1974.vacompanion.device.AudioVolumeManager
@@ -15,12 +17,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 
-class VAMediaPlayer(val context: Context, val config: APPConfig) {
+class VAMediaPlayer(context: Context, val config: APPConfig) {
+    private val appContext = context.applicationContext
     private var currentVolume: Int = config.musicVolume
     private var mediaPlayer: ExoPlayer? = null
     var isVolumeDucked: Boolean = false
     var playRequested: Boolean = false
-    private val audioVolumeManager = AudioVolumeManager(context)
+    private val audioVolumeManager = AudioVolumeManager(appContext)
     val maxVolume = audioVolumeManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
     companion object {
@@ -34,25 +37,34 @@ class VAMediaPlayer(val context: Context, val config: APPConfig) {
             }
     }
 
-    fun play(url: String) {
-        try {
-            if (playRequested) {
-                mediaPlayer!!.stop()
-            }
-        } catch (e: IllegalStateException) {
-            // Here is media player is stopped
+    private fun getPlayer(): ExoPlayer {
+        if (mediaPlayer == null) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build()
+            
+            mediaPlayer = ExoPlayer.Builder(appContext)
+                .setAudioAttributes(audioAttributes, true)
+                .build()
         }
+        return mediaPlayer!!
+    }
 
+    fun play(url: String) {
         playRequested = true
 
         try {
-            mediaPlayer = ExoPlayer.Builder(context).build()
+            val player = getPlayer()
+            player.stop()
+            player.clearMediaItems()
+            
             val mediaItem = MediaItem.fromUri(url.toUri())
-            mediaPlayer!!.setMediaItem(mediaItem)
+            player.setMediaItem(mediaItem)
             // Prepare the player.
-            mediaPlayer!!.prepare()
+            player.prepare()
             // Start the playback.
-            mediaPlayer!!.play()
+            player.play()
             Timber.i("Music started")
         } catch (ex: Exception) {
             Timber.e("Error playing music: $ex")
@@ -62,7 +74,7 @@ class VAMediaPlayer(val context: Context, val config: APPConfig) {
 
     fun pause() {
         try {
-            mediaPlayer!!.pause()
+            mediaPlayer?.pause()
             Timber.i("Music paused")
         } catch (ex: Exception) {
             Timber.e("Error pausing music: $ex")
@@ -71,7 +83,7 @@ class VAMediaPlayer(val context: Context, val config: APPConfig) {
 
     fun resume() {
         try {
-            mediaPlayer!!.play()
+            mediaPlayer?.play()
             Timber.i("Music resumed")
         } catch (ex: Exception) {
             Timber.e("Error resuming music: $ex")
@@ -81,12 +93,22 @@ class VAMediaPlayer(val context: Context, val config: APPConfig) {
     fun stop() {
         try {
             playRequested = false
-            mediaPlayer!!.stop()
-            mediaPlayer!!.release()
+            mediaPlayer?.stop()
+            mediaPlayer?.clearMediaItems()
             Timber.i("Music stopped")
 
         } catch (e: Exception) {
             Timber.e("Error stopping music: $e")
+        }
+    }
+
+    fun release() {
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = null
+            Timber.i("Music player released")
+        } catch (e: Exception) {
+            Timber.e("Error releasing music player: $e")
         }
     }
 
@@ -118,10 +140,11 @@ class VAMediaPlayer(val context: Context, val config: APPConfig) {
             Timber.i("Restoring music volume to ${currentVolume}")
             CoroutineScope(Dispatchers.Main).launch {
                 val steps = 3
-                val diffStepVolume = (currentVolume - mediaPlayer!!.volume) / steps
+                val player = mediaPlayer ?: return@launch
+                val diffStepVolume = (currentVolume / maxVolume.toFloat() - player.volume) / steps
                 for (i in 1..steps) {
-                    val vol = config.duckingVolume + (diffStepVolume * i)
-                    mediaPlayer!!.volume = vol
+                    val vol = player.volume + diffStepVolume
+                    player.volume = vol
                     delay(250)
                     if (i < steps) {
                         delay(250)
