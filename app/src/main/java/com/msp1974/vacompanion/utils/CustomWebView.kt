@@ -139,6 +139,12 @@ class CustomWebView @JvmOverloads constructor(
         w.setPageLoadingState(stage)
     }
 
+    fun refresh() {
+        val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
+        log.d("Loading URL: $url")
+        loadUrl(url)
+    }
+
     companion object {
         fun getView(context: Context): CustomWebView {
             return try {

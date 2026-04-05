@@ -558,7 +558,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             when (event.eventName) {
                 "zoomLevel" -> webView.setZoomLevel(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
-                "refresh" -> webView.reload()
+                "refresh" -> webView.refresh()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
                 "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()

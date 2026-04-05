@@ -34,6 +34,7 @@ enum class PageLoadingStage {
     AUTHORISED,
     LOADED,
     AUTH_FAILED,
+    ERROR
 }
 
 class APPConfig @Inject constructor(val context: Context) {

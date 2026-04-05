@@ -13,6 +13,7 @@ import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebView
 import android.app.AlertDialog
+import android.app.Application
 import androidx.webkit.WebViewClientCompat
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
@@ -59,7 +60,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
         url.let {
             try {
                 val pm: PackageManager = config.context.packageManager
-                val activityContext = config.context.takeIf { it is Activity } ?: return false
+                val activityContext = config.context.takeIf { it is Application || it is Activity } ?: return false
 
                 // If the url is our client id then capture the auth code and get an access token
                 if (it.contains(AuthUtils.CLIENT_URL)) {
@@ -105,7 +106,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                         activityContext.startActivity(intent)
                     }
                     return true
-                } else if (!it.toString().contains(it)) {
+                } else if (!it.contains(it)) {
                     Timber.d("Launching browser")
                     val browserIntent = Intent(Intent.ACTION_VIEW, it.toUri())
                     activityContext.startActivity(browserIntent)
@@ -147,6 +148,8 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
         description: String,
         failingUrl: String
     ) {
+        Timber.e("Received error: $errorCode: $description")
+        setPageLoadingState(PageLoadingStage.ERROR)
         view.loadUrl("file:///android_asset/web/error.html")
     }
 
@@ -185,6 +188,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                 }
                 setNegativeButton(resources.getString(R.string.dialog_button_no)) { _: DialogInterface?, _: Int ->
                     super.onReceivedSslError(view, handler, error)
+                    setPageLoadingState(PageLoadingStage.ERROR)
                     view.loadUrl("file:///android_asset/web/error.html")
                 }
             }.create().show()
@@ -200,6 +204,5 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     ) {
         config.currentPath = URL(url).path
     }
-
 
 }
