@@ -9,6 +9,7 @@ import com.msp1974.vacompanion.wakeword.microwakeword.models.WakeWordWithId
 import com.google.protobuf.ByteString
 import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.audio.VACAAudioFormat
 import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
@@ -20,7 +21,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.yield
 import timber.log.Timber
-import javax.inject.Inject
 import kotlin.collections.plus
 
 open class MicroWakeWordEngine (
@@ -65,7 +65,7 @@ open class MicroWakeWordEngine (
         if (it) emptyFlow()
         else flow {
             val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
-            val audioSource = if(isEmbedded) MicrophoneInput.FALLBACK_AUDIO_SOURCE else MicrophoneInput.DEFAULT_AUDIO_SOURCE
+            val audioSource = if(isEmbedded) VACAAudioFormat.FALLBACK_AUDIO_SOURCE else VACAAudioFormat.DEFAULT_AUDIO_SOURCE
             val microphoneInput = MicrophoneInput(audioSource)
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value

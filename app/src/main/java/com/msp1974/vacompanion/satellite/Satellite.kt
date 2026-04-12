@@ -1,8 +1,8 @@
 package com.msp1974.vacompanion.satellite
 
+import android.annotation.SuppressLint
 import android.content.Context
 import com.msp1974.vacompanion.R
-import com.msp1974.vacompanion.audio.SoundClipPlayer
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.device.Camera
 import com.msp1974.vacompanion.device.SensorUpdatesCallback
@@ -14,7 +14,6 @@ import com.msp1974.vacompanion.device.DeviceCapabilitiesData
 import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.device.ScreenUtils
 import com.msp1974.vacompanion.utils.Event
-import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wyoming.SatelliteState
@@ -32,7 +31,7 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -57,8 +56,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     private val json = Json { ignoreUnknownKeys = true }
     var clientId = clientIdString
-    private val mediaManager: SatelliteMediaManager = SatelliteMediaManager(context, config)
-    val soundClipPlayer = SoundClipPlayer(context)
+    val mediaManager: SatelliteMediaManager = SatelliteMediaManager(context, config)
+    //val soundClipPlayer = SoundClipPlayer(context)
 
 
     private var hasInitSettings: Boolean = false
@@ -211,6 +210,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 Timber.d("Wake word detected: $detection")
                 if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
                     onStopWordDetected(detection)
+                } else if (mediaManager.alarmPlayer.isSounding()) {
+                    onStopWordDetected(detection)
                 } else {
                     handleWakeWordDetection()
                 }
@@ -287,7 +288,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         if (config.wakeWordSound != "none") {
             try {
                 scope.launch {
-                    soundClipPlayer.play(
+                    mediaManager.soundPlayer.play(
                         context.resources.getIdentifier(
                             config.wakeWordSound,
                             "raw",
@@ -304,7 +305,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     fun playErrorSound() {
         try {
             scope.launch {
-                soundClipPlayer.play(
+                mediaManager.soundPlayer.play(
                     context.resources.getIdentifier(
                         "error",
                         "raw",
@@ -345,15 +346,12 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 audioPipelineLastStateChange = System.currentTimeMillis()
                 when (state) {
                     PipelineStage.LISTENING -> {
-                        handleVolumeDucking("all", true)
                         wakeWordHandler?.engine!!.setStreaming(true)
                     }
                     PipelineStage.VOICE_STOPPED -> { wakeWordHandler?.engine!!.setStreaming(false) }
                     PipelineStage.ENDED -> {
                         if (continueConversation.load()) {
                             startAudioPipeline(continuation = true)
-                        } else {
-                            handleVolumeDucking("all", false)
                         }
                     }
                     else -> {}
@@ -371,12 +369,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
         }.also {
             it.run()
-        }
-    }
-
-    fun handleVolumeDucking(type: String, enable: Boolean) {
-        scope.launch(Dispatchers.Main) {
-            mediaManager.updateVolumeDucking(type, enable)
         }
     }
 
@@ -447,20 +439,15 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             when (action) {
                 "play-media" -> if (payloadStr.isNotEmpty()) {
                     val payload = Json.parseToJsonElement(payloadStr).jsonObject
-                    mediaManager.musicPlayer.play(payload["url"]?.jsonPrimitive?.content ?: "")
-                    mediaManager.musicPlayer.setVolume(
-                        payload["volume"]?.jsonPrimitive?.intOrNull ?: 100
-                    )
+                    val url = payload["url"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val volume = payload["volume"]?.jsonPrimitive?.floatOrNull ?: 90f
+                    mediaManager.musicPlayer.play(url, volume)
                 }
-
                 "play" -> mediaManager.musicPlayer.resume()
                 "pause" -> mediaManager.musicPlayer.pause()
-                "stop" -> mediaManager.musicPlayer.stop()
+                "stop" ->  mediaManager.musicPlayer.stop()
                 "set-volume" -> if (payloadStr.isNotEmpty()) {
-                    mediaManager.musicPlayer.setVolume(
-                        Json.parseToJsonElement(payloadStr).jsonObject["volume"]?.jsonPrimitive?.intOrNull
-                            ?: 100
-                    )
+                    mediaManager.musicPlayer.setVolume(Json.parseToJsonElement(payloadStr).jsonObject["volume"]?.jsonPrimitive?.floatOrNull ?: 90f)
                 }
             }
         }
@@ -469,12 +456,10 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private suspend fun handleAlarmAction(enable: Boolean, url: String = "") {
         withContext(Dispatchers.Main) {
             if (enable) {
-                mediaManager.updateVolumeDucking("music", true)
-                mediaManager.alarmPlayer.startAlarm(url)
+                mediaManager.alarmPlayer.start(url)
                 config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
             } else {
-                mediaManager.alarmPlayer.stopAlarm()
-                mediaManager.updateVolumeDucking("music", false)
+                mediaManager.alarmPlayer.stop()
             }
             sendSetting("alarm", enable)
         }
@@ -526,10 +511,10 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     // *************************************************************************
     // ****
     // *************************************************************************
+    @SuppressLint("DiscouragedApi")
     private fun warmUpAudioResources() {
         scope.launch(Dispatchers.Default) {
-            soundClipPlayer.prepare(R.raw.error)
-            soundClipPlayer.prepare(R.raw.stop_word)
+            mediaManager.soundPlayer.preload(R.raw.error)
             if (config.wakeWordSound != "none") {
                 val resId = context.resources.getIdentifier(
                     config.wakeWordSound,
@@ -537,7 +522,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                     context.packageName
                 )
                 if (resId != 0) {
-                    soundClipPlayer.prepare(resId)
+                    mediaManager.soundPlayer.preload(resId)
                 }
             }
         }

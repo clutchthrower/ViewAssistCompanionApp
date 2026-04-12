@@ -13,21 +13,22 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class MicrophoneInput(
-    val audioSource: Int = DEFAULT_AUDIO_SOURCE,
-    val sampleRateInHz: Int = DEFAULT_SAMPLE_RATE_IN_HZ,
-    val channelConfig: Int = DEFAULT_CHANNEL_CONFIG,
-    val audioFormat: Int = DEFAULT_AUDIO_FORMAT,
+    val audioSource: Int = VACAAudioFormat.DEFAULT_AUDIO_SOURCE,
+    val sampleRateInHz: Int = VACAAudioFormat.SAMPLE_RATE_HZ,
+    val channelConfig: Int = VACAAudioFormat.CHANNELS,
+    val audioFormat: Int = VACAAudioFormat.ENCODING,
     val frameSize: Int = 0,
 ) : AutoCloseable {
-    private val bufferSize =
-        AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat)
     private var audioRecord: AudioRecord? = null
 
     private var aec: AcousticEchoCanceler? = null
     private var audioDSP = AudioDSP()
 
+    private val bufferSize =
+        AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat)
+
     val isRecording get() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
-    val speex = SpeexProcessor(sampleRate = DEFAULT_SAMPLE_RATE_IN_HZ, frameSize = if (frameSize > 0) frameSize else bufferSize )
+    val speex = SpeexProcessor(sampleRate = sampleRateInHz, frameSize = if (frameSize > 0) frameSize else bufferSize )
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
@@ -53,7 +54,7 @@ class MicrophoneInput(
         return buffer
     }
 
-    fun readShort(bufferSize: Int = BUFFER_SIZE_IN_SHORTS, useSpeex: Boolean = true): ShortArray {
+    fun readShort(bufferSize: Int = VACAAudioFormat.DEFAULT_BUFFER_SIZE_IN_SHORTS, useSpeex: Boolean = true): ShortArray {
         val audioBuffer = ShortArray(bufferSize)
         val audioRecord = this.audioRecord ?: error("Microphone not started")
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
@@ -68,7 +69,7 @@ class MicrophoneInput(
         return ShortArray(0)
     }
 
-    fun readFloat(bufferSize: Int = BUFFER_SIZE_IN_SHORTS): FloatArray {
+    fun readFloat(bufferSize: Int = VACAAudioFormat.DEFAULT_BUFFER_SIZE_IN_SHORTS): FloatArray {
         val audioBuffer = readShort(bufferSize)
 
         if (audioBuffer.isNotEmpty()) {
@@ -76,7 +77,6 @@ class MicrophoneInput(
         }
         return FloatArray(0)
     }
-
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun createAudioRecord(): AudioRecord {
@@ -101,7 +101,6 @@ class MicrophoneInput(
         } catch (e: Exception) {}
     }
 
-
     override fun close() {
         aec?.release()
         aec = null
@@ -113,14 +112,5 @@ class MicrophoneInput(
             it.release()
             audioRecord = null
         }
-    }
-
-    companion object {
-        const val DEFAULT_AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_RECOGNITION
-        const val FALLBACK_AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
-        const val DEFAULT_SAMPLE_RATE_IN_HZ = 16000
-        const val DEFAULT_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
-        const val DEFAULT_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        const val BUFFER_SIZE_IN_SHORTS = 1280
     }
 }

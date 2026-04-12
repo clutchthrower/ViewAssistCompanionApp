@@ -93,7 +93,7 @@ class SatelliteCustomEventHandler(
 
                 if (config.wakeWordSound != "none") {
                     try {
-                        satellite.soundClipPlayer.play(R.raw.error)
+                        satellite.mediaManager.soundPlayer.play(R.raw.error)
                     } catch (e: Exception) {
                         Timber.e("Error playing wake word sound: ${e.message.toString()}")
                     }

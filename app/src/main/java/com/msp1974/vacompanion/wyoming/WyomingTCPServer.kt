@@ -172,31 +172,29 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                 "pong" -> {}
                 "describe" -> sendInfo(clientId)
                 "capabilities" -> sendCapabilities(clientId)
-                "run-satellite" -> startSatellite(clientId)
+                "run-satellite" -> {
+                    startSatellite(clientId)
+                }
                 "pause-satellite" -> stopSatellite()
                 else -> {
-                    if (satellite != null && clientId == satellite?.clientId && satellite?.state != SatelliteState.STOPPED) {
-                        satellite?.processMessage(packet)
-                    } else {
+                    var retryCount = 2
+                    var processed = false
+                    while (retryCount > 0) {
+                        if (satellite != null && clientId == satellite?.clientId && satellite?.state != SatelliteState.STOPPED) {
+                            satellite?.processMessage(packet)
+                            processed = true
+                            break
+                        } else {
+                            retryCount--
+                            delay(500)
+                        }
+                    }
+                    if (!processed) {
                         Timber.w("Cannot process message ${packet.toMap()}")
                         when {
                             satellite == null -> Timber.w("Satellite is null")
                             clientId != satellite?.clientId -> Timber.w("Client id does not match satellite id")
                             satellite?.state == SatelliteState.STOPPED -> Timber.w("Satellite is stopped")
-                        }
-                        if (satellite?.state == SatelliteState.STARTING) {
-                            try {
-                                withTimeout(1000L) {
-                                    while (true) {
-                                        if (satellite != null && clientId == satellite?.clientId && satellite?.state != SatelliteState.STOPPED) {
-                                            satellite?.processMessage(packet)
-                                            break
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Timber.w("Timed out waiting for satellite to start")
-                            }
                         }
                     }
                 }
@@ -219,8 +217,11 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
     }
 
     private suspend fun startSatellite(clientId: String) {
+        Timber.d("Processing run satellite")
         if (satellite != null) {
+            Timber.d("Satellite not null")
             if (satellite?.state == SatelliteState.RUNNING) {
+                Timber.d("Satellite already running - updating clientId")
                 satellite?.clientId = clientId
                 return
             } else {
@@ -228,6 +229,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
             }
         }
         try {
+            Timber.d("Starting new satellite")
             satellite = object: Satellite(context, config, scope, clientId, deviceInfo) {
                 override fun onEvent(event: String, data: JsonObject) {
                     Timber.d("Satellite event: $event")
@@ -256,8 +258,10 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
             val satId = satellite?.clientId
             satellite?.stop()
             satellite = null
-            clients[satId]?.handler?.socket?.close()
-            clients.remove(satId)
+            withContext(Dispatchers.IO) {
+                clients[satId]?.handler?.socket?.close()
+                clients.remove(satId)
+            }
         }
     }
 

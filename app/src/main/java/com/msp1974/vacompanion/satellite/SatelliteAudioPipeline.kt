@@ -88,6 +88,7 @@ abstract class SatelliteAudioPipeline(
                 }
                 Timber.d("Starting pipeline [$pipelineId]")
                 sendMessage(buildRunPipelineMessage())
+                mediaManager.voicePlayer.start(22050,2,1)
                 pipelineStage = PipelineStage.STARTED
                 audioMessageHandler()
                 awaitCancellation()
@@ -103,6 +104,7 @@ abstract class SatelliteAudioPipeline(
                         else -> { "Pipeline ended for unknown reason" }
                     }
                     Timber.d("$msg [$pipelineId]")
+                    mediaManager.voicePlayer.stop()
                     onFinish(result)
                     pipelineStage = PipelineStage.ENDED
                 }
@@ -114,7 +116,6 @@ abstract class SatelliteAudioPipeline(
     }
 
     fun stop() {
-        mediaManager.pcmMediaPlayer.stop(force = true)
         if (pipelineStage != PipelineStage.ENDED) sendMessage(buildAudioStopMessage())
         pipelineRunning.complete(PipelineEndReason.FORCE_STOPPED)
     }
@@ -143,13 +144,17 @@ abstract class SatelliteAudioPipeline(
                 while (true) {
                     val msg = audioMessageQueue.receive()
                     when (msg.type) {
-                        "audio-start" -> handleAudioStart()
+                        "audio-start" -> handleAudioStart(msg)
                         "audio-chunk" -> handleAudioChunk(msg)
                         "audio-stop" -> handleAudioStop()
                     }
+                    yield()
                 }
             } finally {
-                audioMessageQueue.cancel()
+                withContext(NonCancellable) {
+                    Timber.d("Ending audio message handler.")
+                    audioMessageQueue.cancel()
+                }
             }
         }
         result = pipelineRunning.await()
@@ -194,36 +199,34 @@ abstract class SatelliteAudioPipeline(
         }
     }
 
-    internal fun handleAudioStart() {
+    internal fun handleAudioStart(msg: WyomingPacket) {
         pipelineStage = PipelineStage.STREAMING_TTS
-        mediaManager.pcmMediaPlayer.play()
     }
 
     internal fun handleAudioChunk(event: WyomingPacket) {
-        if (pipelineStage == PipelineStage.STREAMING_TTS && mediaManager.pcmMediaPlayer.isPlaying) {
-            synchronized(mediaManager) {
-                mediaManager.pcmMediaPlayer.writeAudio(event.payload)
-            }
+        if (pipelineStage == PipelineStage.STREAMING_TTS && mediaManager.voicePlayer.isPlaying()) {
+            mediaManager.voicePlayer.writeData(event.payload)
         }
     }
 
     internal fun handleAudioStop() {
-        if (mediaManager.pcmMediaPlayer.isPlaying) {
+        if (mediaManager.voicePlayer.isPlaying()) {
             // We send 'played' but we DON'T stop immediately, to allow draining.
             // The next synthesizer or a reset will stop it properly.
-            mediaManager.pcmMediaPlayer.stop()
+            mediaManager.voicePlayer.flush()
 
             scope.launch {
                 try {
                     withTimeout(10000) {
-                        while (mediaManager.pcmMediaPlayer.isPlaying) {
+                        while (mediaManager.voicePlayer.isPlaying()) {
                             delay(100)
                             yield()
                         }
                     }
+                } catch (e: Exception) {
+                    Timber.d("Audio stop timed out")
                 } finally {
                     withContext(NonCancellable) {
-                        mediaManager.pcmMediaPlayer.stop(force = true)
                         sendMessage(buildPlayedMessage())
                         pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
                     }

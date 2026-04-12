@@ -3,6 +3,7 @@ package com.msp1974.vacompanion.satellite
 import android.Manifest
 import android.content.Context
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.audio.VACAAudioFormat
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Event
@@ -60,7 +61,7 @@ abstract class SatelliteWakeWorkHandler(val context: Context, val config: APPCon
     private var lastWakeWordDetectionScore = 0f
     private val detectionCooldowns = mutableMapOf<String, Long>()
     private val detectionCooldownMs: Long = 2000L
-    private val msPerChunk: Long = (MicrophoneInput.BUFFER_SIZE_IN_SHORTS.toLong() * 1000L) / MicrophoneInput.DEFAULT_SAMPLE_RATE_IN_HZ.toLong()
+    private val msPerChunk: Long = (VACAAudioFormat.DEFAULT_BUFFER_SIZE_IN_SHORTS  * 1000L) / VACAAudioFormat.SAMPLE_RATE_HZ
 
     private val audioHistoryBuffer = LinkedList<WakeWordEngineProvider.AudioResult.Audio>()
     private val historyBufferTargetDurationMs = 1000L

@@ -103,6 +103,7 @@ dependencies {
     implementation(libs.protobuf.kotlin)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.ktor.network)
+    implementation(libs.androidx.datastore.core)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     androidTestImplementation(libs.mockk.android)

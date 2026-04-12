@@ -39,6 +39,7 @@ mockk = "1.14.9"
 ktor = "3.4.2"
 ksp = "2.3.6"
 hilt = "2.59.2"
+datastoreCore = "1.2.1"
 
 
 
@@ -94,6 +95,7 @@ mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "moc
 ktor-network = { group = "io.ktor", name="ktor-network", version.ref = "ktor"}
 hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
+androidx-datastore-core = { group = "androidx.datastore", name = "datastore-core", version.ref = "datastoreCore" }
 
 
 
