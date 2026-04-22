@@ -1,16 +1,14 @@
-package com.msp1974.vacompanion.ui
+  package com.msp1974.vacompanion.ui
 
 import android.app.Application
 import android.content.res.Configuration
 import android.content.res.Resources
-import androidx.lifecycle.viewModelScope
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.Helpers
-import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.satellite.AudioRouteOption
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -96,8 +93,6 @@ class VAViewModel @Inject constructor(
 
     var resources: Resources = application.resources
     var permissions: Permissions = Permissions(application.applicationContext, config)
-
-
 
     init {
         _vacaState.value = State()
@@ -352,10 +347,5 @@ class VAViewModel @Inject constructor(
             config.eventBroadcaster.notifyEvent(Event("restartZeroconf", "", ""))
         }
     }
-
-    fun startSatellite() {
-        viewModelScope.launch {    }
-    }
-
 }
 
