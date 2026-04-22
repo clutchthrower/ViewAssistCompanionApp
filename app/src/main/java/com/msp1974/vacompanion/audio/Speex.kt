@@ -121,6 +121,10 @@ class SpeexProcessor(
     fun setAGCLevel(level: Int) {
         agcState.targetLevel = level
     }
+
+    fun setMaxAGCGain(gain: Float) {
+        agcState.maxGain = gain
+    }
     
     /**
      * Set echo suppression strength
@@ -251,6 +255,7 @@ private class EchoState(
  */
 private class AGCState {
     var targetLevel = 20000
+    var maxGain = 10f
     private var currentGain = 1.0f
     private val attackTime = 0.001f
     private val releaseTime = 0.1f
@@ -283,7 +288,7 @@ private class AGCState {
         }
         
         // Limit gain to reasonable range
-        currentGain = desiredGain.coerceIn(0.1f, 10.0f)
+        currentGain = desiredGain.coerceIn(0.1f, maxGain)
         
         // Apply gain
         for (i in input.indices) {

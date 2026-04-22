@@ -1,18 +1,17 @@
 package com.msp1974.vacompanion.audio
 
 import android.Manifest
-import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
-import android.media.audiofx.NoiseSuppressor
 import androidx.annotation.RequiresPermission
+import com.msp1974.vacompanion.settings.APPConfig
 import timber.log.Timber
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import javax.inject.Inject
 
-class MicrophoneInput(
+class MicrophoneInput (
+    val config: APPConfig,
     val audioSource: Int = VACAAudioFormat.DEFAULT_AUDIO_SOURCE,
     val sampleRateInHz: Int = VACAAudioFormat.SAMPLE_RATE_HZ,
     val channelConfig: Int = VACAAudioFormat.CHANNELS,
@@ -61,7 +60,8 @@ class MicrophoneInput(
         if (readCount > 0) {
             if (useSpeex) {
                 speex.denoiseEnabled = false
-                speex.setAGCLevel(20000)
+                speex.setAGCLevel(24000)
+                speex.setMaxAGCGain(20f + (config.micGain * 1.95f))
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }
             return audioBuffer.copyOfRange(0, readCount)

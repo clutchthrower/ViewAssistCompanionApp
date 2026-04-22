@@ -142,7 +142,7 @@ class OpenWakeWordEngine(
         else flow {
             val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
             val audioSource = if(isEmbedded) VACAAudioFormat.FALLBACK_AUDIO_SOURCE else VACAAudioFormat.DEFAULT_AUDIO_SOURCE
-            val microphoneInput = MicrophoneInput(audioSource, frameSize = 1280)
+            val microphoneInput = MicrophoneInput(config, audioSource, frameSize = 1280)
             try {
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))

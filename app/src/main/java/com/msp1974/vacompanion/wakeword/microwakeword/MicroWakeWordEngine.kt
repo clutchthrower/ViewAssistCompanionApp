@@ -66,7 +66,7 @@ open class MicroWakeWordEngine (
         else flow {
             val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
             val audioSource = if(isEmbedded) VACAAudioFormat.FALLBACK_AUDIO_SOURCE else VACAAudioFormat.DEFAULT_AUDIO_SOURCE
-            val microphoneInput = MicrophoneInput(audioSource)
+            val microphoneInput = MicrophoneInput(config, audioSource)
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value
             var detector = createDetector(wakeWords, stopWords)
