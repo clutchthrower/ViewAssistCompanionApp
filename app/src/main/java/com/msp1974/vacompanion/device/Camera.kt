@@ -23,22 +23,22 @@ import androidx.core.app.ActivityCompat
 import com.jjoe64.motiondetection.motiondetection.AggregateLumaMotionDetection
 import com.jjoe64.motiondetection.motiondetection.ImageProcessing
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.AuthUtils
 import com.msp1974.vacompanion.utils.Event
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import javax.inject.Inject
 import kotlin.math.absoluteValue
 import kotlin.math.max
 import kotlin.math.min
 
 class Camera(val context: Context, val config: APPConfig) {
 
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(job + Dispatchers.IO)
 
     private var checkInterval: Long = 500
     private var lastCheck: Long = 0
@@ -95,7 +95,7 @@ class Camera(val context: Context, val config: APPConfig) {
                 imageReader = null
 
             } catch (e: Exception) {
-                Timber.Forest.e("Error closing camera: $e")
+                Timber.e("Error closing camera: $e")
             } finally {
                 isRunning = false
             }
@@ -136,7 +136,7 @@ class Camera(val context: Context, val config: APPConfig) {
                 if (settleDelayJob != null && !settleDelayJob?.isActive!!) {
                     if (detector.detect(img, image.width, image.height)) {
                         if (System.currentTimeMillis() - lastDetection > MOTION_INTERVAL) {
-                            AuthUtils.Companion.log.d("Motion detected")
+                            Timber.d("Motion detected")
                             config.eventBroadcaster.notifyEvent(Event("motion", "", ""))
                             lastDetection = System.currentTimeMillis()
                         }
@@ -189,21 +189,21 @@ class Camera(val context: Context, val config: APPConfig) {
             }
         }
 
-        AuthUtils.Companion.log.i("Camera ID: $camId")
+        Timber.i("Camera ID: $camId")
 
         previewSize = chooseSupportedSize(camId!!, 320, 240)
-        Timber.Forest.d("Camera preview size is $previewSize")
+        Timber.d("Camera preview size is $previewSize")
 
 
         try {
             cameraManager!!.openCamera(camId, stateCallback, Handler(Looper.getMainLooper()))
         } catch (e: Exception) {
-            AuthUtils.Companion.log.w("Error accessing camera: $e")
+            Timber.w("Error accessing camera: $e")
         }
 
         // Settle motion detection to reduce false detections at start
         try {
-            AuthUtils.Companion.log.d("Motion detection running....")
+            Timber.d("Motion detection running....")
             if (settleDelayJob != null && settleDelayJob!!.isActive) {
                 settleDelayJob?.cancel()
             }
@@ -211,7 +211,7 @@ class Camera(val context: Context, val config: APPConfig) {
                 delay(settleDelay)
             }
         } catch (e: Exception) {
-            AuthUtils.Companion.log.e("Error on settle job: $e")
+            Timber.e("Error on settle job: $e")
         }
 
     }
@@ -285,6 +285,7 @@ class Camera(val context: Context, val config: APPConfig) {
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             }
 
+
             // Prepare CameraCaptureSession
             cameraDevice!!.createCaptureSession(targetSurfaces,
                 object : CameraCaptureSession.StateCallback() {
@@ -303,18 +304,18 @@ class Camera(val context: Context, val config: APPConfig) {
 
 
                         } catch (e: CameraAccessException) {
-                            AuthUtils.Companion.log.e("createCaptureSession - $e")
+                            Timber.e("createCaptureSession - $e")
                         }
 
                     }
 
                     override fun onConfigureFailed(cameraCaptureSession: CameraCaptureSession) {
-                        AuthUtils.Companion.log.e("createCaptureSession()")
+                        Timber.e("createCaptureSession()")
                     }
                 }, null
             )
         } catch (e: CameraAccessException) {
-            AuthUtils.Companion.log.e("createCaptureSession - $e")
+            Timber.e("createCaptureSession - $e")
         }
     }
 }

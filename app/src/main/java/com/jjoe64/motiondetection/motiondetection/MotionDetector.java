@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class MotionDetector {
     class MotionDetectorThread extends Thread {
-        private AtomicBoolean isRunning = new AtomicBoolean(true);
+        private final AtomicBoolean isRunning = new AtomicBoolean(true);
 
         public void stopDetection() {
             isRunning.set(false);
