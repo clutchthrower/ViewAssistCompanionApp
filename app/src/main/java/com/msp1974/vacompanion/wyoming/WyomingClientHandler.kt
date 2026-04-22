@@ -48,7 +48,13 @@ abstract class WyomingClientHandler (
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun run() {
+    fun run() {
+        scope.launch {
+            start()
+        }
+    }
+
+    suspend fun start() {
         try {
             watchDogJob = scope.launch {
                 watchDogProcess(WATCHDOG_SOCKET_TIMEOUT)
@@ -87,6 +93,10 @@ abstract class WyomingClientHandler (
                 onClientDisconnected(socketId)
             }
         }
+    }
+
+    fun stop() {
+        runClient = false
     }
 
     private suspend fun pinger() {

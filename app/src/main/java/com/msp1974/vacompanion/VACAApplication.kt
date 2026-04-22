@@ -13,6 +13,7 @@ import timber.log.Timber.DebugTree
 class VACAApplication: Application() {
     override fun onCreate() {
         super.onCreate()
+        Thread.setDefaultUncaughtExceptionHandler(AppExceptionHandler(this.applicationContext))
 
         activityManager = ActivityManager(this)
         Timber.plant(DebugTree())

@@ -22,6 +22,7 @@ import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.BackgroundTaskStatus
 import com.msp1974.vacompanion.utils.FirebaseManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
@@ -86,10 +87,6 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
                         .setSmallIcon(R.mipmap.ic_launcher)
                         .setContentTitle("View Assist Companion App")
                         .setContentText("Service is running")
-                        .addAction(
-                            R.drawable.outline_stop_circle_24, getString(R.string.stop_service),
-                            stopServiceIntent(Actions.STOP.toString())
-                        )
                         .build()
 
                 lifecycleScope.launch {
@@ -144,13 +141,12 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
                     //        Timber.e("Foreground service failed to launch activity - ${ex.message}")
                     //    }
                     //}
-                    restartActivityWatchdog()
+                    //restartActivityWatchdog()
                 }
             }
 
             Actions.STOP.toString() -> {
-                firebase.addToCrashLog("Background service stopping")
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                Timber.d("Stopping foreground service")
                 stopSelf()
             }
         }
@@ -195,6 +191,7 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
         Timber.i("Stopping Background Service")
         watchdogTimer.cancel()
         backgroundTask?.shutdown()
+
         config.backgroundTaskRunning = false
         config.backgroundTaskStatus = BackgroundTaskStatus.NOT_STARTED
 

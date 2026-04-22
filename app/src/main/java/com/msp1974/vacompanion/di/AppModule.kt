@@ -1,6 +1,5 @@
 package com.msp1974.vacompanion.di
 
-import android.app.Application
 import android.content.Context
 import com.msp1974.vacompanion.settings.APPConfig
 import dagger.Module

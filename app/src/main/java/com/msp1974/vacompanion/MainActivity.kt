@@ -145,7 +145,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         val policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
         StrictMode.setThreadPolicy(policy)
-        Thread.setDefaultUncaughtExceptionHandler(AppExceptionHandler(this))
 
         setStatus(getString(R.string.status_initialising))
         keepSplashScreen = false
@@ -166,7 +165,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         setContent {
             val vaUiState by viewModel.vacaState.collectAsState()
-            AppTheme(darkMode = config.darkMode, dynamicColor = false) {
+            AppTheme(darkMode = false, dynamicColor = false) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize(),
@@ -468,6 +467,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
     override fun onDestroy() {
         log.d("Main Activity destroyed")
+
+        Intent(this.applicationContext, VAForegroundService::class.java).also {
+            it.action = VAForegroundService.Actions.STOP.toString()
+            startService(it)
+        }
+
         screen.setScreenTimeout(config.screenTimeout)
         config.eventBroadcaster.removeListener(this)
         LocalBroadcastManager.getInstance(this).unregisterReceiver(satelliteBroadcastReceiver)

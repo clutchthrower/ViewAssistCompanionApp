@@ -1,7 +1,6 @@
 package com.msp1974.vacompanion.settings
 
 import android.annotation.SuppressLint
-import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
@@ -16,7 +15,6 @@ import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Logger
 import kotlinx.serialization.json.*
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlin.properties.Delegates
 import kotlin.reflect.KProperty
@@ -73,7 +71,6 @@ class APPConfig @Inject constructor(val context: Context) {
     var audioWidth: Int = 2
 
     //var connectionCount: Int = 0
-    var atomicConnectionCount: AtomicInteger = AtomicInteger(0)
     var currentActivity: String = ""
     var backgroundTaskRunning: Boolean = false
     var backgroundTaskStatus: BackgroundTaskStatus = BackgroundTaskStatus.NOT_STARTED
@@ -235,15 +232,6 @@ class APPConfig @Inject constructor(val context: Context) {
     var screenOrientationMode: String by Delegates.observable("auto") { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
-
-    // Status Items
-    var networkConnected: Boolean by Delegates.observable(false) { property, oldValue, newValue ->
-        onValueChangedListener(property, oldValue, newValue)
-    }
-
-
-
-
 
 
     // SharedPreferences

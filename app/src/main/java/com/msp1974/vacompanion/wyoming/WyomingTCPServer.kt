@@ -1,37 +1,30 @@
 package com.msp1974.vacompanion.wyoming
 
 import android.content.Context
-import com.google.android.gms.tasks.Tasks.await
 import com.msp1974.vacompanion.satellite.Satellite
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.device.DeviceCapabilitiesData
 import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
-import com.msp1974.vacompanion.utils.Helpers.Companion.getIpv4HostAddress
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.components.SingletonComponent
 import io.ktor.network.selector.ActorSelectorManager
 import io.ktor.network.sockets.ServerSocket
 import io.ktor.network.sockets.aSocket
 import io.ktor.network.sockets.port
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import timber.log.Timber
 import java.util.concurrent.Executors
-import javax.inject.Inject
-
 
 interface IEvents {
     fun onEvent(event: String, data: JsonObject)
@@ -41,7 +34,6 @@ interface IEvents {
 data class Connection(
     val id: String,
     val handler: WyomingClientHandler,
-    val job: Job
 )
 
 data class MessageQueueItem(
@@ -89,8 +81,14 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
 
         Timber.d("Starting zeroconf")
-        zeroconf = Zeroconf(context, config.uuid)
-        zeroconf.registerService(config.serverPort)
+        try {
+            zeroconf = Zeroconf(context, config.uuid)
+            registerNSD()
+        } catch (e: Exception) {
+            Timber.e("Error starting zeroconf: $e")
+            state = ServerState.ERRORED
+            return
+        }
 
         withContext(Dispatchers.IO) {
             try {
@@ -108,7 +106,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
                             if (clientId in clients) {
                                 val client = clients[clientId]
-                                client?.job?.cancel()
+                                client?.handler?.stop()
                                 clients.remove(clientId)
                             }
                             Timber.d("Client disconnected: $clientId.  Total: ${clients.size}")
@@ -130,35 +128,63 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                             clientId: String,
                             message: WyomingPacket
                         ) {
-                            messageHandler(clientId, message)
+                            try {
+                                messageHandler(clientId, message)
+                            } catch (e: Exception) {
+                                Timber.e("Error processing message: $e")
+                            }
                         }
                     }
 
-                    val job = launch {
-                        client.run()
-                    }
+                    client.run()
                     val id = socket.remoteAddress.port().toString()
-                    clients[id] = Connection(id, client, job)
+                    clients[id] = Connection(id, client)
                     Timber.d("Client connected: ${socket.remoteAddress}.  Total: ${clients.size}")
                     onEvent("client_connected", data)
+
+                    yield()
 
                 }
             } catch (e: Throwable) {
                 ensureActive()
                 Timber.e("Server Error: ${e.toString()}")
             } finally {
-                state = ServerState.STOPPING
-                serverSocket?.close()
-                zeroconf.unregisterService()
-                state = ServerState.STOPPED
-                Timber.i("Wyoming TCP Server stopped")
+                withContext(NonCancellable) {
+                    Timber.d("Stopping Wyoming TCP Server...")
+                    state = ServerState.STOPPING
+                    stopSatellite()
+                    try {
+                        if (!clients.isEmpty()) {
+                            clients.forEach { client ->
+                                Timber.d("Stopping client: ${client.key}")
+                                client.value.handler.stop()
+                            }
+                            clients.clear()
+                        }
+                        serverSocket?.close()
+                        unregisterNSD()
+                    } catch (e: Exception) {
+                        Timber.e("Error when stopping server: $e")
+                    }
+                    state = ServerState.STOPPED
+                    Timber.i("Wyoming TCP Server stopped")
+                }
             }
         }
     }
 
-    fun stopServer() {
-        restartIfStopped = false
+    fun stopServer(restartAfterStop: Boolean = false) {
+        restartIfStopped = restartAfterStop
         runServer = false
+        serverSocket?.close()
+    }
+
+    private fun registerNSD() {
+        zeroconf.registerService(config.serverPort)
+    }
+
+    private fun unregisterNSD() {
+        zeroconf.unregisterService()
     }
 
     private suspend fun messageHandler(clientId: String, packet: WyomingPacket) {
@@ -180,13 +206,13 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                     var retryCount = 2
                     var processed = false
                     while (retryCount > 0) {
-                        if (satellite != null && clientId == satellite?.clientId && satellite?.state != SatelliteState.STOPPED) {
+                        if (satellite != null && satellite?.state != SatelliteState.STOPPED) {
                             satellite?.processMessage(packet)
                             processed = true
                             break
                         } else {
                             retryCount--
-                            delay(500)
+                            delay(1000)
                         }
                     }
                     if (!processed) {
@@ -219,17 +245,29 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
     private suspend fun startSatellite(clientId: String) {
         Timber.d("Processing run satellite")
         if (satellite != null) {
-            Timber.d("Satellite not null")
             if (satellite?.state == SatelliteState.RUNNING) {
                 Timber.d("Satellite already running - updating clientId")
                 satellite?.clientId = clientId
                 return
+            } else if (satellite?.state == SatelliteState.STOPPING) {
+                try {
+                    Timber.d("Satellite shutting down.  Waiting...")
+                    withTimeout(2000) {
+                        while (satellite != null) {
+                            delay(100)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.w("Satellite taking too long to stop.  Terminating")
+                    stopSatellite()
+                }
             } else {
+                Timber.d("Satellite in a bad state - stopping and starting again")
                 stopSatellite()
             }
         }
         try {
-            Timber.d("Starting new satellite")
+            Timber.d("Starting satellite")
             satellite = object: Satellite(context, config, scope, clientId, deviceInfo) {
                 override fun onEvent(event: String, data: JsonObject) {
                     Timber.d("Satellite event: $event")
@@ -244,8 +282,9 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                     sendMessage(clientId, type, data, payload)
                 }
             }.also {
+                unregisterNSD()
                 scope.launch {
-                    satellite?.start()
+                    it.start()
                 }
             }
         } catch (e: Exception) {
@@ -262,6 +301,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                 clients[satId]?.handler?.socket?.close()
                 clients.remove(satId)
             }
+            registerNSD()
         }
     }
 

@@ -7,8 +7,10 @@ import com.msp1974.vacompanion.wyoming.ServerState
 import com.msp1974.vacompanion.wyoming.WyomingTCPServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import timber.log.Timber
 
@@ -35,9 +37,15 @@ internal class BackgroundTaskController (private val context: Context, val confi
                         wifiLock?.acquire()
                     }
                     ServerState.STOPPED -> {
-                        wifiLock?.release()
+                        Timber.d("Wyoming server stopped. Restart: $restartIfStopped")
+                        if (wifiLock != null && wifiLock!!.isHeld) {
+                            wifiLock!!.release()
+                        }
                         // Restart server
                         if (restartIfStopped) runServer()
+                    }
+                    ServerState.ERRORED -> {
+                        restartOnError()
                     }
                     else -> {}
                 }
@@ -49,6 +57,12 @@ internal class BackgroundTaskController (private val context: Context, val confi
         Timber.d("Background task initialisation completed")
     }
 
+    fun restartOnError() {
+        server?.let {
+            it.stopServer()
+            start()
+        }
+    }
 
     fun runServer() {
         // TODO: Implement a recovery process
@@ -69,9 +83,9 @@ internal class BackgroundTaskController (private val context: Context, val confi
 
     fun shutdown() {
         Timber.i("Shutting down")
+        server?.stopServer()
         if (wifiLock != null && wifiLock!!.isHeld) {
             wifiLock!!.release()
         }
-        server?.stopServer()
     }
 }
