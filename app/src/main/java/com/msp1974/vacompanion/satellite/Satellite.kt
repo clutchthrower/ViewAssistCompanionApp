@@ -57,8 +57,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private val json = Json { ignoreUnknownKeys = true }
     var clientId = clientIdString
     val mediaManager: SatelliteMediaManager = SatelliteMediaManager(context, config)
-    //val soundClipPlayer = SoundClipPlayer(context)
-
 
     private var hasInitSettings: Boolean = false
 
@@ -77,6 +75,10 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private var continueConversation = AtomicBoolean(false)
 
     var state: SatelliteState = SatelliteState.STOPPED
+        set(value) {
+            field = value
+            config.isRunning = value == SatelliteState.RUNNING
+        }
     private var volumeObserver: VolumeObserver? = null
 
 
@@ -144,18 +146,18 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
     }
 
-    suspend fun sendDeviceStates() {
+    fun sendDeviceStates() {
         config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
         config.screenOn = ScreenUtils(context, config).isScreenOn()
 
     }
 
-
-
     suspend fun stop() {
         state = SatelliteState.STOPPING
 
         stopAudioPipeline()
+
+        mediaManager.stopAll()
 
         volumeObserver?.unregister()
 
@@ -164,8 +166,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             wakeWordHandler?.stop()
         }.join()
 
-
-        //terminateWakeWordDetection()
         motionTask.stopCamera()
         stopSensors()
         state = SatelliteState.STOPPED
@@ -569,11 +569,17 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             val data = DiagnosticInfo(
                 show = config.diagnosticsEnabled,
                 engine = config.wakeWordEngine,
-                audioLevel = audioLevel * 150,
+                audioLevel = audioLevel * 100,
                 detectionLevel = detectionLevel * 10,
                 detectionThreshold = config.wakeWordThreshold * 10,
                 wakeWord = config.wakeWord,
-                mode = if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.LISTENING) AudioRouteOption.STREAM else AudioRouteOption.DETECT
+                mode = if (wakeWordHandler?.state != WakeWordHandlerState.RUNNING) {
+                    AudioRouteOption.NONE
+                } else if (wakeWordHandler?.engine?.isStreaming() ?: false) {
+                    AudioRouteOption.STREAM
+                } else {
+                    AudioRouteOption.DETECT
+                }
             )
             val event = Event("diagnosticStats", "", data)
             config.eventBroadcaster.notifyEvent(event)
