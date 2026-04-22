@@ -57,7 +57,7 @@ class AlarmService() : Service() {
     }
 
     fun play(url: String) {
-        Timber.d("Playing alarm: $url")
+        Timber.i("Alarm started: $url")
         val player = mediaPlayer ?: return
 
         try {
@@ -156,6 +156,7 @@ class AlarmService() : Service() {
         abandonAudioFocus()
         sInstance = null
         super.onDestroy()
+        Timber.i("Alarm player stopped")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

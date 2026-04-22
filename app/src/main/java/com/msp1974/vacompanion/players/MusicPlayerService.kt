@@ -16,6 +16,12 @@ import androidx.media3.common.audio.AudioManagerCompat
 import androidx.media3.exoplayer.ExoPlayer
 import com.msp1974.vacompanion.settings.APPConfig
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 import kotlin.math.min
@@ -32,6 +38,9 @@ class MusicPlayerService() : Service() {
     private var focusRequest: AudioFocusRequestCompat? = null
     private var hasAudioFocus = false
     private var musicVolume: Float = 1f
+
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Default + job)
 
     companion object {
         var sInstance: MusicPlayerService? = null
@@ -98,8 +107,7 @@ class MusicPlayerService() : Service() {
                     player.play()
                 }
             }
-            //player.volume = config.mediaPlayerGain / 10f
-            player.volume = musicVolume
+            animateUnDuckingVolume()
         }
     }
 
@@ -147,7 +155,7 @@ class MusicPlayerService() : Service() {
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                        mediaPlayer?.volume = min(config.duckingVolume / 10f, musicVolume)
+                        mediaPlayer?.volume = getDuckingVolume()
                     }
                 }
             }
@@ -158,6 +166,31 @@ class MusicPlayerService() : Service() {
         hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Timber.d("Music requestAudioFocus: $result")
         return hasAudioFocus
+    }
+
+    private fun getDuckingVolume(): Float {
+        return min(config.duckingVolume / 30f, musicVolume)
+    }
+
+    private fun animateUnDuckingVolume (
+        durationMs: Long = 1000,
+        steps: Int = 5
+    ) {
+        val delay = durationMs / steps
+        val currentVolume = mediaPlayer?.volume ?: 1f
+        val increment = (musicVolume - currentVolume) / steps
+
+        if (increment < 0) return
+
+        scope.launch {
+            for (i in 1..steps) {
+                val vol = currentVolume + (i * increment)
+                withContext(Dispatchers.Main) {
+                    mediaPlayer?.volume = vol
+                    delay(delay)
+                }
+            }
+        }
     }
 
     @SuppressLint("UnsafeOptInUsageError")

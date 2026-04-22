@@ -49,8 +49,8 @@ class SoundEffectsPlayer(val context: Context) {
         }
     }
 
-    fun play(resId: Int) {
-        mainHandler.post {
+    suspend fun play(resId: Int) {
+        withContext(Dispatchers.Main) {
             try {
                 // Ensure only one feedback sound plays at a time
                 stopAllInternal()
@@ -78,12 +78,13 @@ class SoundEffectsPlayer(val context: Context) {
         }
     }
 
-    fun stop(force: Boolean) {
+    suspend fun stop() {
         stopAllInternal()
+        release()
     }
 
-    private fun stopAllInternal() {
-        mainHandler.post {
+    private suspend fun stopAllInternal() {
+        withContext(Dispatchers.Main) {
             players.values.forEach {
                 if (it.isPlaying) {
                     it.pause()
@@ -93,8 +94,8 @@ class SoundEffectsPlayer(val context: Context) {
         }
     }
 
-    fun release() {
-        mainHandler.post {
+    suspend fun release() {
+        withContext(Dispatchers.Main) {
             players.values.forEach { it.release() }
             players.clear()
         }

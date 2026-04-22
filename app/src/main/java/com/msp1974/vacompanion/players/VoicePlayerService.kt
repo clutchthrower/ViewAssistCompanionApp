@@ -98,10 +98,13 @@ class VoicePlayerService() : Service() {
             Timber.w("Sending voice audio to non playing player")
             return
         }
-
-        val writeResult = mediaPlayer?.write(buffer, 0, buffer.size) ?: 0
-        if (writeResult < 0) {
-            Timber.w("AudioTrack write failed with code $writeResult")
+        try {
+            val writeResult = mediaPlayer?.write(buffer, 0, buffer.size) ?: 0
+            if (writeResult < 0) {
+                Timber.w("AudioTrack write failed with code $writeResult")
+            }
+        } catch (e: Exception) {
+            Timber.e("Error writing voice audio: $e")
         }
     }
 

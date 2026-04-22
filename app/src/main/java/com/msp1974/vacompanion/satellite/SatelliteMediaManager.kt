@@ -18,13 +18,9 @@ class SatelliteMediaManager(val context: Context, val config: APPConfig) {
     val musicPlayer = MusicManager(context)
     val alarmPlayer = AlarmManager(context)
 
-    fun release() {
-        Timber.d("Release called")
-        stopAll()
-    }
-
-    fun stopAll() {
-        soundPlayer.stop(force = true)
+    suspend fun stopAll() {
+        Timber.d("Stopping media manager")
+        soundPlayer.stop()
         voicePlayer.stop()
         musicPlayer.stop()
         alarmPlayer.stop()
