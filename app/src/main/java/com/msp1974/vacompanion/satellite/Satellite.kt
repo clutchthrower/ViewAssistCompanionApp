@@ -148,7 +148,11 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     fun sendDeviceStates() {
         config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
-        config.screenOn = ScreenUtils(context, config).isScreenOn()
+
+        val screenState = ScreenUtils(context, config).isScreenOn()
+        if (config.screenOn != screenState) {
+            config.screenOn = ScreenUtils(context, config).isScreenOn()
+        }
 
     }
 
