@@ -244,6 +244,16 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
     private suspend fun   startSatellite(clientId: String) {
         Timber.d("Processing run satellite")
+
+        val serverIP = clients[clientId]?.handler?.clientIP ?: ""
+
+        if (config.pairedDeviceID.isEmpty()) {
+            config.pairedDeviceID = serverIP
+        } else if (!isValidServer(serverIP)) {
+            Timber.e("Non paired server attempted to start satellite.  Paired to ${config.pairedDeviceID}, attempting server: $serverIP")
+            return
+        }
+
         if (satellite != null) {
             if (satellite?.state == SatelliteState.RUNNING) {
                 Timber.d("Satellite already running - updating clientId")
@@ -268,7 +278,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         }
         try {
             Timber.d("Starting satellite")
-            config.homeAssistantConnectedIP = clients[clientId]?.handler?.clientIP ?: ""
+            config.homeAssistantConnectedIP = serverIP
             satellite = object: Satellite(context, config, scope, clientId, deviceInfo) {
                 override fun onEvent(event: String, data: JsonObject) {
                     Timber.d("Satellite event: $event")
@@ -291,6 +301,10 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         } catch (e: Exception) {
             Timber.e("Error starting satellite: $e")
         }
+    }
+
+    private fun isValidServer(ipAddr: String): Boolean {
+        return config.pairedDeviceID == "" || config.pairedDeviceID == ipAddr
     }
 
     private suspend fun stopSatellite() {
