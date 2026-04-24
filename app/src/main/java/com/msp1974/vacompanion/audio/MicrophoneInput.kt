@@ -3,6 +3,8 @@ package com.msp1974.vacompanion.audio
 import android.Manifest
 import android.media.AudioRecord
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import androidx.annotation.RequiresPermission
 import com.msp1974.vacompanion.settings.APPConfig
 import timber.log.Timber
@@ -21,6 +23,9 @@ class MicrophoneInput (
     private var audioRecord: AudioRecord? = null
 
     private var aec: AcousticEchoCanceler? = null
+    private var ns: NoiseSuppressor? = null
+    private var agc: AutomaticGainControl? = null
+
     private var audioDSP = AudioDSP()
 
     private val bufferSize =
@@ -37,7 +42,7 @@ class MicrophoneInput (
         }
 
         if (!isRecording) {
-            Timber.d("Starting microphone with AEC=${aec != null}")
+            Timber.d("Starting microphone with AGC=${agc != null}, AEC=${aec != null}, NS=${ns != null}")
             audioRecord?.startRecording()
         } else {
             Timber.w("Microphone already started")
@@ -58,9 +63,9 @@ class MicrophoneInput (
         val audioRecord = this.audioRecord ?: error("Microphone not started")
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
         if (readCount > 0) {
-            if (useSpeex) {
+            if (useSpeex && !AutomaticGainControl.isAvailable()) {
                 speex.denoiseEnabled = false
-                speex.setAGCLevel(24000)
+                speex.setAGCLevel(20000)
                 speex.setMaxAGCGain(20f + (config.micGain * 1.95f))
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }
@@ -96,14 +101,32 @@ class MicrophoneInput (
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
         try {
-            aec = AcousticEchoCanceler.create(sessionId)
-            aec?.enabled = true
+            if (AutomaticGainControl.isAvailable()) {
+                agc = AutomaticGainControl.create(sessionId)
+                agc?.enabled = true
+            }
+            if (AcousticEchoCanceler.isAvailable()) {
+                aec = AcousticEchoCanceler.create(sessionId)
+                aec?.enabled = true
+            }
+
+            if (NoiseSuppressor.isAvailable()) {
+                ns = NoiseSuppressor.create(sessionId)
+                ns?.enabled = true
+            }
         } catch (e: Exception) {}
     }
 
     override fun close() {
+
+        agc?.release()
+        agc = null
+
         aec?.release()
         aec = null
+
+        ns?.release()
+        ns = null
 
         audioRecord?.let {
             if (isRecording) {
