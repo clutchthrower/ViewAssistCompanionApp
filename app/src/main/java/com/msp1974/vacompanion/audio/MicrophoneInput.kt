@@ -63,7 +63,7 @@ class MicrophoneInput (
         val audioRecord = this.audioRecord ?: error("Microphone not started")
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
         if (readCount > 0) {
-            if (useSpeex && !AutomaticGainControl.isAvailable()) {
+            if (useSpeex) {
                 speex.denoiseEnabled = false
                 speex.setAGCLevel(20000)
                 speex.setMaxAGCGain(20f + (config.micGain * 1.95f))
