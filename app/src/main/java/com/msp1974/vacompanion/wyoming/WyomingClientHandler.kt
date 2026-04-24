@@ -54,6 +54,15 @@ abstract class WyomingClientHandler (
         }
     }
 
+    val clientIP: String
+        get() {
+            try {
+                return socket.remoteAddress.toString().split(":")[0].replace("/", "")
+            } catch (e: Exception) {
+                return ""
+            }
+        }
+
     suspend fun start() {
         try {
             watchDogJob = scope.launch {

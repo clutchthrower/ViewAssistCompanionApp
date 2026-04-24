@@ -242,7 +242,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         respondToGenericMessage(clientId, "capabilities", DeviceCapabilitiesManager.toJson(deviceInfo))
     }
 
-    private suspend fun startSatellite(clientId: String) {
+    private suspend fun   startSatellite(clientId: String) {
         Timber.d("Processing run satellite")
         if (satellite != null) {
             if (satellite?.state == SatelliteState.RUNNING) {
@@ -268,6 +268,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         }
         try {
             Timber.d("Starting satellite")
+            config.homeAssistantConnectedIP = clients[clientId]?.handler?.clientIP ?: ""
             satellite = object: Satellite(context, config, scope, clientId, deviceInfo) {
                 override fun onEvent(event: String, data: JsonObject) {
                     Timber.d("Satellite event: $event")
