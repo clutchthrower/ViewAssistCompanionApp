@@ -90,7 +90,6 @@ class SatelliteMediaManager(val context: Context, val config: APPConfig) {
 
         fun stop() {
             try {
-                VoicePlayerService.sInstance?.stop(true)
                 context.stopService(voiceService)
             } catch (e: Exception) {
                 Timber.e(e)

@@ -210,26 +210,26 @@ abstract class SatelliteAudioPipeline(
     }
 
     internal fun handleAudioStop() {
-        if (mediaManager.voicePlayer.isPlaying()) {
-            // We send 'played' but we DON'T stop immediately, to allow draining.
-            // The next synthesizer or a reset will stop it properly.
-            mediaManager.voicePlayer.flush()
-
-            scope.launch {
-                try {
+        scope.launch {
+            try {
+                if (mediaManager.voicePlayer.isPlaying()) {
+                    // We send 'played' but we DON'T stop immediately, to allow draining.
+                    // The next synthesizer or a reset will stop it properly.
+                    mediaManager.voicePlayer.flush()
                     withTimeout(10000) {
                         while (mediaManager.voicePlayer.isPlaying()) {
                             delay(100)
                             yield()
                         }
                     }
-                } catch (e: Exception) {
-                    Timber.d("Audio stop timed out")
-                } finally {
-                    withContext(NonCancellable) {
-                        sendMessage(buildPlayedMessage())
-                        pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
-                    }
+                }
+            } catch (e: Exception) {
+                Timber.d("Audio stop timed out")
+            } finally {
+                withContext(NonCancellable) {
+                    mediaManager.voicePlayer.stop()
+                    sendMessage(buildPlayedMessage())
+                    pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
                 }
             }
         }
