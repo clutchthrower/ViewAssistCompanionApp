@@ -177,9 +177,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
     suspend fun processMessage(packet: WyomingPacket) {
-        //Timber.d("SATELLITE -> Message received: ${packet.toMap()}")
         when (packet.type) {
             "custom-event" -> customEventHandler(clientId, packet)
+            "audio-start" -> handleAudioStart(packet)
             else -> {
                 if (audioPipeline != null && audioPipeline?.pipelineStage != PipelineStage.ENDED) {
                     audioPipeline?.processAudioPipelineMessage(packet)
@@ -255,7 +255,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         startWakeWordDetection()
     }
 
-    fun handleWakeWordDetection() {
+    suspend fun handleWakeWordDetection() {
         var startNewPipeline = audioPipeline == null || audioPipeline?.pipelineStage == PipelineStage.ENDED
 
         if (!startNewPipeline) {
@@ -282,24 +282,22 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             if (config.screenOnWakeWord) {
                 config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
             }
-
-            startAudioPipeline(continuation = false)
+            sendWakeWordDetection()
+            startAudioPipeline(PipelineStartStage.START_LISTENING, continuation = false)
             playWakeWordDetectionSound()
         }
     }
 
-    fun playWakeWordDetectionSound() {
+    suspend fun playWakeWordDetectionSound() {
         if (config.wakeWordSound != "none") {
             try {
-                scope.launch {
-                    mediaManager.soundPlayer.play(
-                        context.resources.getIdentifier(
-                            config.wakeWordSound,
-                            "raw",
-                            context.packageName
-                        )
+                mediaManager.soundPlayer.play(
+                    context.resources.getIdentifier(
+                        config.wakeWordSound,
+                        "raw",
+                        context.packageName
                     )
-                }
+                )
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
             }
@@ -330,10 +328,17 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
 
-
+suspend fun handleAudioStart(packet: WyomingPacket) {
+    if (audioPipeline != null && audioPipeline?.pipelineStage != PipelineStage.ENDED) {
+        audioPipeline?.processAudioPipelineMessage(packet)
+    } else {
+        startAudioPipeline(PipelineStartStage.START_STREAM_TTS, false)
+        audioPipeline?.processAudioPipelineMessage(packet)
+    }
+}
 
     @OptIn(ExperimentalAtomicApi::class)
-    fun startAudioPipeline(continuation: Boolean) {
+    fun startAudioPipeline(startStage: PipelineStartStage, continuation: Boolean) {
         if (audioPipeline != null) {
             audioPipeline?.stop()
             audioPipeline = null
@@ -354,8 +359,13 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                     }
                     PipelineStage.VOICE_STOPPED -> { wakeWordHandler?.engine!!.setStreaming(false) }
                     PipelineStage.ENDED -> {
+                        if (wakeWordHandler?.engine!!.isStreaming()) {
+                            wakeWordHandler?.engine!!.setStreaming(false)
+                        }
+                        audioPipeline?.stop()
+                        audioPipeline = null
                         if (continueConversation.load()) {
-                            startAudioPipeline(continuation = true)
+                            startAudioPipeline(PipelineStartStage.START_LISTENING, continuation = true)
                         }
                     }
                     else -> {}
@@ -366,13 +376,13 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 if (reason != PipelineEndReason.END_OF_PIPELINE) {
                     continueConversation.store(false)
                 }
-                if (reason == PipelineEndReason.ERRORED && config.wakeWordSound != "none") {
+                if ((reason == PipelineEndReason.ERRORED || reason == PipelineEndReason.TIMED_OUT) && config.wakeWordSound != "none") {
                     playErrorSound()
                 }
             }
 
         }.also {
-            it.run()
+            it.run(startStage)
         }
     }
 
@@ -497,6 +507,18 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 }
             }
         })
+    }
+
+    fun sendWakeWordDetection() {
+        //status.pipelineStatus = PipelineStatus.LISTENING
+        sendEvent(
+            "detection",
+            buildJsonObject {
+                put("name", config.wakeWord)
+                put("timestamp", DateTimeFormatter.ISO_INSTANT.format(Instant.now()))
+                put("speaker", "")
+            }
+        )
     }
 
     fun sendEvent(type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
