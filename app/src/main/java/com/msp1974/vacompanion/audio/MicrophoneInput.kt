@@ -63,9 +63,9 @@ class MicrophoneInput (
         val readCount = audioRecord.read(audioBuffer, 0, audioBuffer.size)
         if (readCount > 0) {
             if (useSpeex && !AutomaticGainControl.isAvailable()) {
+                speex.echoSuppressionEnabled = false
                 speex.denoiseEnabled = false
-                speex.setAGCLevel(20000)
-                speex.setMaxAGCGain(20f + (config.micGain * 1.95f))
+                speex.setMaxAGCGain(10f + (config.micGain * 1.95f))
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }
             return audioBuffer.copyOfRange(0, readCount)

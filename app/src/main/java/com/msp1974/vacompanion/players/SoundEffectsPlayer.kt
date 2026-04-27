@@ -48,7 +48,7 @@ class SoundEffectsPlayer(val context: Context) {
             player.setMediaItem(mediaItem)
             player.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_ENDED) {
+                    if (playbackState == Player  .STATE_ENDED) {
                         _finished.value = true
                     }
                 }
@@ -63,6 +63,7 @@ class SoundEffectsPlayer(val context: Context) {
     suspend fun play(resId: Int) {
         withContext(Dispatchers.Main) {
             try {
+                _finished.value = false
                 // Ensure only one feedback sound plays at a time
                 stopAllInternal()
 

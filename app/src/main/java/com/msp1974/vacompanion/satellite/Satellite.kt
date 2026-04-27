@@ -21,6 +21,7 @@ import com.msp1974.vacompanion.wyoming.WyomingPacket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -69,6 +70,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private var audioPipeline: SatelliteAudioPipeline? = null
     private var audioPipelineId = AtomicInteger(0)
     private var audioPipelineLastStateChange = System.currentTimeMillis()
+
+    private var soundEffectFinishTime: Long = 0
 
 
     @OptIn(ExperimentalAtomicApi::class)
@@ -200,47 +203,48 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
 
         Timber.d("Starting Wake Word Detection")
-
-        wakeWordHandler = object: SatelliteWakeWorkHandler(context, config, scope) {
-            override fun onStateChange(state: WakeWordHandlerState) {
-                Timber.d("Wake word handler state: $state")
-            }
-
-            override fun onAudio(audio: ByteArray) {
-                sendAudio(audio)
-            }
-
-            override suspend fun onWakeWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
-                Timber.d("Wake word detected: $detection")
-                if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
-                    onStopWordDetected(detection)
-                } else if (mediaManager.alarmPlayer.isSounding()) {
-                    onStopWordDetected(detection)
-                } else {
-                    handleWakeWordDetection()
-                }
-            }
-
-            override suspend fun onStopWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
-                if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
-                    continueConversation.store(false)
-                    audioPipeline?.stop()
-                    audioPipeline = null
+        withContext(Dispatchers.Default) {
+            wakeWordHandler = object : SatelliteWakeWorkHandler(context, config, scope) {
+                override fun onStateChange(state: WakeWordHandlerState) {
+                    Timber.d("Wake word handler state: $state")
                 }
 
-                if (mediaManager.alarmPlayer.isSounding()) {
-                    handleAlarmAction(false, "")
+                override suspend fun onAudio(audio: WakeWordEngineProvider.AudioResult.Audio) {
+                    sendAudio(audio)
                 }
 
-                Timber.d("Stop word detected: $detection")
-            }
+                override suspend fun onWakeWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
+                    Timber.d("Wake word detected: $detection")
+                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
+                        onStopWordDetected(detection)
+                    } else if (mediaManager.alarmPlayer.isSounding()) {
+                        onStopWordDetected(detection)
+                    } else {
+                        handleWakeWordDetection()
+                    }
+                }
 
-            override fun onDiagnostics(level: Float, lastDetectionLevel: Float) {
-                sendDiagnostics(level, lastDetectionLevel)
+                override suspend fun onStopWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
+                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
+                        continueConversation.store(false)
+                        audioPipeline?.stop()
+                        audioPipeline = null
+                    }
+
+                    if (mediaManager.alarmPlayer.isSounding()) {
+                        handleAlarmAction(false, "")
+                    }
+
+                    Timber.d("Stop word detected: $detection")
+                }
+
+                override fun onDiagnostics(level: Float, lastDetectionLevel: Float) {
+                    sendDiagnostics(level, lastDetectionLevel)
+                }
+            }.also {
+                Timber.d("Starting Wake Word Detection")
+                it.run()
             }
-        }.also {
-            Timber.d("Starting Wake Word Detection")
-            it.run()
         }
     }
 
@@ -256,6 +260,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
     suspend fun handleWakeWordDetection() {
+        soundEffectFinishTime = 0L
         var startNewPipeline = audioPipeline == null || audioPipeline?.pipelineStage == PipelineStage.ENDED
 
         if (!startNewPipeline) {
@@ -298,6 +303,14 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                         context.packageName
                     )
                 )
+                Timber.i("Started wake word sound")
+                scope.launch {
+                    while(!mediaManager.soundPlayer.finished.value) {
+                        delay(50)
+                    }
+                    soundEffectFinishTime = System.currentTimeMillis()
+                    Timber.i("Ended wake word sound")
+                }
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
             }
@@ -386,9 +399,11 @@ suspend fun handleAudioStart(packet: WyomingPacket) {
         }
     }
 
-    fun sendAudio(audio: ByteArray) {
+    suspend fun sendAudio(audio: WakeWordEngineProvider.AudioResult.Audio) {
         if (audioPipeline != null) {
-            audioPipeline?.sendMicAudio(audio)
+            if (soundEffectFinishTime > 0 && audio.timestamp >= soundEffectFinishTime) {
+                audioPipeline?.sendMicAudio(audio.audio.toByteArray())
+            }
         }
     }
 
