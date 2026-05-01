@@ -2,6 +2,7 @@ package com.msp1974.vacompanion.satellite
 
 import android.annotation.SuppressLint
 import android.content.Context
+import androidx.media3.common.Player
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.device.Camera
@@ -256,6 +257,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     suspend fun restartWakeWordDetection() {
         stopWakeWordDetection()
+        warmUpAudioResources()
         startWakeWordDetection()
     }
 
@@ -305,15 +307,17 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 )
                 Timber.i("Started wake word sound")
                 scope.launch {
-                    while(!mediaManager.soundPlayer.finished.value) {
+                    while(mediaManager.soundPlayer.state.value != Player.STATE_ENDED) {
                         delay(50)
                     }
-                    soundEffectFinishTime = System.currentTimeMillis()
+                    audioPipeline?.silenceAudioBefore = System.currentTimeMillis()
                     Timber.i("Ended wake word sound")
                 }
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
             }
+        } else {
+            audioPipeline?.silenceAudioBefore = 1L
         }
     }
 
@@ -401,9 +405,7 @@ suspend fun handleAudioStart(packet: WyomingPacket) {
 
     suspend fun sendAudio(audio: WakeWordEngineProvider.AudioResult.Audio) {
         if (audioPipeline != null) {
-            if (soundEffectFinishTime > 0 && audio.timestamp >= soundEffectFinishTime) {
-                audioPipeline?.sendMicAudio(audio.audio.toByteArray())
-            }
+            audioPipeline?.sendMicAudio(audio)
         }
     }
 

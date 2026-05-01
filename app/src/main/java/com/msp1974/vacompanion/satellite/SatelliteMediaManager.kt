@@ -13,7 +13,6 @@ import timber.log.Timber
 @SuppressLint("UnsafeOptInUsageError")
 class SatelliteMediaManager(val context: Context, val config: APPConfig) {
     val soundPlayer = SoundEffectsPlayer(context)
-
     val voicePlayer = VoiceManager(context)
     val musicPlayer = MusicManager(context)
     val alarmPlayer = AlarmManager(context)

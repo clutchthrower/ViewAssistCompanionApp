@@ -9,6 +9,7 @@ import com.msp1974.vacompanion.wakeword.openwakeword.OpenWakeWordEngine
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordDetection
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.takeWhile
 
 data class WakeWord(val name: String, val fileName: String, val builtIn: Boolean = true)
 enum class WakeWordEngineModel {MICROWAKEWORD, OPENWAKEWORD}

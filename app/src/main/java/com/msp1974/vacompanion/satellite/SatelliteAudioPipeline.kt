@@ -1,9 +1,11 @@
 package com.msp1974.vacompanion.satellite
 
 import android.content.Context
+import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.satellite.Satellite.Companion.isoNow
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.Event
+import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wyoming.WyomingPacket
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -69,7 +71,7 @@ abstract class SatelliteAudioPipeline(
 
     private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
     private var audioInMessageQueue = Channel<WyomingPacket>(capacity = 1000)
-    private var audioOutQueue = Channel<ByteArray>(capacity = 1000)
+    private var audioOutQueue = Channel<WakeWordEngineProvider.AudioResult.Audio>(capacity = 1000)
     private var result: PipelineEndReason = PipelineEndReason.NONE
     var stageStartTime: Long = System.currentTimeMillis()
     var pipelineStartStage: PipelineStartStage = PipelineStartStage.START_LISTENING
@@ -80,6 +82,8 @@ abstract class SatelliteAudioPipeline(
             stageStartTime = System.currentTimeMillis()
             onStateChange(value)
         }
+
+    var silenceAudioBefore: Long = 0L
 
     fun run(startStage: PipelineStartStage = PipelineStartStage.START_LISTENING) {
         scope.launch {
@@ -130,15 +134,11 @@ abstract class SatelliteAudioPipeline(
                 Timber.d("Starting listening pipeline at stage $startStage: [$pipelineId]")
                 sendMessage(buildRunPipelineMessage(startStage))
 
-                pipelineStage = PipelineStage.STARTED
-                watchDogTimer()
                 mediaManager.voicePlayer.start()
-                scope.launch {
-                    audioInMessageHandler()
-                }
-                scope.launch {
-                    audioOutHandler()
-                }
+                scope.launch { audioInMessageHandler() }
+                scope.launch { audioOutHandler() }
+                watchDogTimer()
+                pipelineStage = PipelineStage.STARTED
                 awaitCancellation()
             } finally {
                 //TODO: Change to audio stop
@@ -216,9 +216,15 @@ abstract class SatelliteAudioPipeline(
             Timber.d("AudioOut handler started.")
             try {
                 while (true) {
-                    val audioBytes = audioOutQueue.receive()
-                    val packet = buildAudioPacketMessage(audioBytes)
-                    sendMessage(packet)
+                    if (silenceAudioBefore > 0L) {
+                        val audio = audioOutQueue.receive()
+                        var audioByteArray = audio.audio.toByteArray()
+                        if (audio.timestamp < silenceAudioBefore - 100) {
+                            audioByteArray = AudioDSP().reduceVolume(audioByteArray, 0.1F)
+                        }
+                        val packet = buildAudioPacketMessage(audioByteArray)
+                        sendMessage(packet)
+                    }
                     yield()
                 }
             } finally {
@@ -233,7 +239,7 @@ abstract class SatelliteAudioPipeline(
         Timber.d("AudioOut handler stopped.")
     }
 
-    suspend fun sendMicAudio(audio: ByteArray): Boolean {
+    suspend fun sendMicAudio(audio: WakeWordEngineProvider.AudioResult.Audio): Boolean {
         if (pipelineStage == PipelineStage.LISTENING  || pipelineStage == PipelineStage.VOICE_STARTED) {
             audioOutQueue.send(audio)
             return true

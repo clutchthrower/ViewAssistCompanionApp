@@ -1,20 +1,26 @@
 package com.msp1974.vacompanion.wyoming
 
+import com.msp1974.vacompanion.satellite.PipelineEndReason
 import io.ktor.network.sockets.Socket
 import io.ktor.network.sockets.openReadChannel
 import io.ktor.network.sockets.openWriteChannel
 import io.ktor.network.sockets.port
+import io.ktor.utils.io.availableForWrite
+import io.ktor.utils.io.flushIfNeeded
 import io.ktor.utils.io.readByte
 import io.ktor.utils.io.readLine
 import io.ktor.utils.io.readPacket
 import io.ktor.utils.io.writeByteArray
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
@@ -42,13 +48,16 @@ abstract class WyomingClientHandler (
     var lastMessage: Long = System.currentTimeMillis()
     private lateinit var watchDogJob: Job
     private lateinit var pingJob: Job
+    private lateinit var writeHandlerJob: Job
 
     val receiveChannel = socket.openReadChannel()
     val sendChannel = socket.openWriteChannel(autoFlush = false)
 
+    private var writeBuffer = Channel<WyomingPacket>(capacity = 100)
+
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun run() {
+    init {
         scope.launch {
             start()
         }
@@ -65,6 +74,16 @@ abstract class WyomingClientHandler (
 
     suspend fun start() {
         try {
+            writeHandlerJob = scope.launch {
+                while(true) {
+                    select {
+                        writeBuffer.onReceive { packet ->
+                            writeMessageInternal(packet)
+                        }
+                    }
+                }
+            }
+
             watchDogJob = scope.launch {
                 watchDogProcess(WATCHDOG_SOCKET_TIMEOUT)
             }
@@ -159,7 +178,15 @@ abstract class WyomingClientHandler (
         return null
     }
 
-    suspend fun writeMessage(packet: WyomingPacket) {
+    fun writeMessage(packet: WyomingPacket) {
+        val result = writeBuffer.trySend(packet)
+        if (!result.isSuccess) {
+            Timber.e("Error writing packet to output buffer")
+        }
+
+    }
+
+    private suspend fun writeMessageInternal(packet: WyomingPacket) {
 
         val version = "1.0.0"
         if (sendChannel.isClosedForWrite) {
@@ -169,7 +196,6 @@ abstract class WyomingClientHandler (
         }
 
         withContext(Dispatchers.IO) {
-
             val dataBytes = packet.data.toString().toByteArray(Charsets.UTF_8)
 
             val header = buildJsonObject {

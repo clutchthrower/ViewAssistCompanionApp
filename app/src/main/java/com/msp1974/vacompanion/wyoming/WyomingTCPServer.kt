@@ -17,6 +17,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
@@ -136,7 +137,6 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                         }
                     }
 
-                    client.run()
                     val id = socket.remoteAddress.port().toString()
                     clients[id] = Connection(id, client)
                     Timber.d("Client connected: ${socket.remoteAddress}.  Total: ${clients.size}")
@@ -320,7 +320,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         }
     }
 
-    private suspend fun respondToGenericMessage(clientId: String, type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
+    private fun respondToGenericMessage(clientId: String, type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
         val packet = WyomingPacket(type, data, payload)
         if (type !in IGNORED_LOG_EVENTS) {
             Timber.d("Sending -> $clientId: ${packet.toMap()}")
@@ -330,13 +330,11 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
     fun sendMessage(clientId: String, type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
         if (satellite != null && clientId == satellite?.clientId) {
-            scope.launch {
-                val packet = WyomingPacket(type, data, payload)
-                if (type !in IGNORED_LOG_EVENTS) {
-                    Timber.d("Sending -> $clientId: ${packet.toMap()}")
-                }
-                clients[clientId]?.handler?.writeMessage(packet)
+            val packet = WyomingPacket(type, data, payload)
+            if (type !in IGNORED_LOG_EVENTS) {
+                Timber.d("Sending -> $clientId: ${packet.toMap()}")
             }
+            clients[clientId]?.handler?.writeMessage(packet)
         }
     }
 

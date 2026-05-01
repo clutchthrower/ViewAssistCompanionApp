@@ -1,7 +1,6 @@
 package com.msp1974.vacompanion.players
 
 import android.content.Context
-import android.os.Handler
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -13,12 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import timber.log.Timber
 
 class SoundEffectsPlayer(val context: Context) {
     private val players = mutableMapOf<Int, ExoPlayer>()
-    private val _finished = MutableStateFlow(false)
-     val finished: StateFlow<Boolean> = _finished
+    private val _state = MutableStateFlow(Player.STATE_IDLE)
+    val state: StateFlow<Int> = _state
 
     val audioAttributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(USAGE_NOTIFICATION)
@@ -48,9 +46,7 @@ class SoundEffectsPlayer(val context: Context) {
             player.setMediaItem(mediaItem)
             player.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player  .STATE_ENDED) {
-                        _finished.value = true
-                    }
+                    _state.value = playbackState
                 }
             })
             return player
@@ -63,7 +59,6 @@ class SoundEffectsPlayer(val context: Context) {
     suspend fun play(resId: Int) {
         withContext(Dispatchers.Main) {
             try {
-                _finished.value = false
                 // Ensure only one feedback sound plays at a time
                 stopAllInternal()
 
@@ -76,9 +71,9 @@ class SoundEffectsPlayer(val context: Context) {
                     val adhocPlayer = createPlayer(resId)
                     adhocPlayer.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
+                            _state.value = playbackState
                             if (playbackState == Player.STATE_ENDED) {
                                 adhocPlayer.release()
-                                _finished.value = true
                             }
                         }
                     })
