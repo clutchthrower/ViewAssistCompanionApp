@@ -18,7 +18,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import timber.log.Timber
@@ -32,12 +36,15 @@ enum class PipelineStage {
     VOICE_STOPPED,
     AWAITING_RESPONSE,
     AWAITING_TTS,
+    STARTING_TTS,
     STREAMING_TTS,
+    COMPLETED_TTS,
     ENDED,
 }
 
-enum class PipelineStartStage {
-    START_LISTENING,
+enum class PipelineStartMode {
+    WAKE_WORD_DETECTED,
+    CONTINUE_CONVERSATION,
     START_STREAM_TTS
 }
 
@@ -53,7 +60,7 @@ enum class PipelineEndReason {
 interface IAudioPipeline {
     fun sendMessage(packet: WyomingPacket)
     fun onStateChange(state: PipelineStage)
-    fun onFinish(reason: PipelineEndReason)
+    fun onFinish(reason: PipelineEndReason, continueConversation: Boolean)
 }
 
 abstract class SatelliteAudioPipeline(
@@ -62,19 +69,20 @@ abstract class SatelliteAudioPipeline(
     val config: APPConfig,
     val pipelineId: Int,
     val mediaManager: SatelliteMediaManager,
-    val isContinuation: Boolean = false
 ): IAudioPipeline {
 
     companion object {
-        val CONTINUATION_STOP_WORDS = listOf("stop", "never mind")
+        val CONTINUATION_STOP_WORDS = listOf("never mind")
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
     private var pipelineRunning = CompletableDeferred<PipelineEndReason>()
     private var audioInMessageQueue = Channel<WyomingPacket>(capacity = 1000)
     private var audioOutQueue = Channel<WakeWordEngineProvider.AudioResult.Audio>(capacity = 1000)
     private var result: PipelineEndReason = PipelineEndReason.NONE
+    private var shouldContinueConversation = config.continueConversation
     var stageStartTime: Long = System.currentTimeMillis()
-    var pipelineStartStage: PipelineStartStage = PipelineStartStage.START_LISTENING
+    var pipelineStartMode: PipelineStartMode = PipelineStartMode.WAKE_WORD_DETECTED
     var pipelineStage = PipelineStage.INIT
         set(value) {
             // Only allow increasing statuses
@@ -85,7 +93,10 @@ abstract class SatelliteAudioPipeline(
 
     var silenceAudioBefore: Long = 0L
 
-    fun run(startStage: PipelineStartStage = PipelineStartStage.START_LISTENING) {
+    private val isContinuation
+        get() = pipelineStartMode == PipelineStartMode.CONTINUE_CONVERSATION
+
+    fun run(startStage: PipelineStartMode = PipelineStartMode.WAKE_WORD_DETECTED) {
         scope.launch {
             start(startStage)
         }
@@ -121,24 +132,34 @@ abstract class SatelliteAudioPipeline(
         }
     }
 
-    suspend fun start(startStage: PipelineStartStage, sendDetection: Boolean = false) {
-        pipelineStartStage = startStage
+    suspend fun start(startMode: PipelineStartMode) {
+        pipelineStartMode = startMode
         val job = scope.launch(Dispatchers.Default) {
             try {
                 pipelineStage = PipelineStage.STARTING
-                if (sendDetection) {
-                    Timber.d("Sending detection event")
-                    sendMessage(buildDetectionMessage())
-                }
-
-                Timber.d("Starting listening pipeline at stage $startStage: [$pipelineId]")
-                sendMessage(buildRunPipelineMessage(startStage))
 
                 mediaManager.voicePlayer.start()
                 scope.launch { audioInMessageHandler() }
                 scope.launch { audioOutHandler() }
                 watchDogTimer()
                 pipelineStage = PipelineStage.STARTED
+
+                Timber.d("Starting listening pipeline at stage $pipelineStartMode: [$pipelineId]")
+
+                when(pipelineStartMode) {
+                    PipelineStartMode.WAKE_WORD_DETECTED -> {
+                        sendMessage(buildDetectionMessage())
+                        sendMessage(buildRunPipelineMessage(pipelineStartMode))
+                    }
+                    PipelineStartMode.CONTINUE_CONVERSATION -> {
+                        silenceAudioBefore = 1L
+                        sendMessage(buildRunPipelineMessage(pipelineStartMode))
+                    }
+                    PipelineStartMode.START_STREAM_TTS -> {
+                        shouldContinueConversation = false
+                    }
+                }
+
                 awaitCancellation()
             } finally {
                 //TODO: Change to audio stop
@@ -153,8 +174,8 @@ abstract class SatelliteAudioPipeline(
                     }
                     Timber.d("$msg [$pipelineId]")
                     mediaManager.voicePlayer.stop()
-                    onFinish(result)
                     pipelineStage = PipelineStage.ENDED
+                    onFinish(result, shouldContinueConversation)
                 }
             }
         }
@@ -165,6 +186,7 @@ abstract class SatelliteAudioPipeline(
 
     fun stop(endReason: PipelineEndReason = PipelineEndReason.FORCE_STOPPED) {
         if (pipelineStage != PipelineStage.ENDED) sendMessage(buildAudioStopMessage())
+        shouldContinueConversation = false
         pipelineRunning.complete(endReason)
     }
 
@@ -174,6 +196,7 @@ abstract class SatelliteAudioPipeline(
             "voice-started" -> handleVoiceStarted()
             "voice-stopped" -> handleVoiceStopped()
             "transcript" -> handleTranscript(packet)
+            "handled" -> handleHandled(packet)
             "synthesize" -> handleSynthesize()
             "audio-start", "audio-chunk", "audio-stop" -> queueAudioMessage(packet)
             "pipeline-ended" -> handlePipelineEnded()
@@ -268,37 +291,58 @@ abstract class SatelliteAudioPipeline(
         pipelineStage = PipelineStage.AWAITING_RESPONSE
     }
 
+    internal fun handleHandled(packet: WyomingPacket) {
+        if (shouldContinueConversation) return
+
+        if (packet.getProp("context") != "") {
+            val context = json.parseToJsonElement(packet.getProp("context")).jsonObject
+            val intentOutput = context["intent_output"]?.jsonObject
+            if (intentOutput != null) {
+                shouldContinueConversation = intentOutput["continue_conversation"]?.jsonPrimitive?.boolean ?: false
+            }
+            Timber.d("Continue conversation: $shouldContinueConversation")
+        }
+    }
+
     internal fun handleSynthesize() {
         if (pipelineStage != PipelineStage.STREAMING_TTS) {
             pipelineStage = PipelineStage.AWAITING_TTS
         }
     }
 
-    internal fun handleAudioStart(msg: WyomingPacket) {
+    internal suspend fun handleAudioStart(msg: WyomingPacket) {
         val rate = msg.getProp("rate").toInt()
         val width = msg.getProp("width").toInt()
         val channels = msg.getProp("channels").toInt()
         mediaManager.voicePlayer.play(rate,width,channels)
-        pipelineStage = PipelineStage.STREAMING_TTS
+        try {
+            withTimeout(1000) {
+                while (!mediaManager.voicePlayer.isReady()) {
+                    delay(50)
+                }
+            }
+        } catch (e: Exception) {
+            return
+        }
+        pipelineStage = PipelineStage.STARTING_TTS
     }
 
-    internal suspend fun handleAudioChunk(event: WyomingPacket) {
-        if (pipelineStage == PipelineStage.STREAMING_TTS) {
+    internal fun handleAudioChunk(event: WyomingPacket) {
+        if (pipelineStage == PipelineStage.STARTING_TTS) pipelineStage = PipelineStage.STREAMING_TTS
+
+        if (mediaManager.voicePlayer.isReady() && pipelineStage == PipelineStage.STREAMING_TTS) {
             try {
-                withTimeout(1000) {
-                    while (!mediaManager.voicePlayer.isReady()) {
-                        delay(50)
-                    }
-                    mediaManager.voicePlayer.writeData(event.payload)
-                }
-            } catch (e: Exception) {}
+                mediaManager.voicePlayer.writeData(event.payload)
+            } catch (e: Exception) {
+                Timber.e("Error writing audio data")
+            }
         }
     }
 
     internal fun handleAudioStop() {
         scope.launch {
             try {
-                if (mediaManager.voicePlayer.isPlaying()) {
+                if (pipelineStage == PipelineStage.STREAMING_TTS && mediaManager.voicePlayer.isPlaying()) {
                     // We send 'played' but we DON'T stop immediately, to allow draining.
                     // The next synthesizer or a reset will stop it properly.
                     mediaManager.voicePlayer.flush()
@@ -308,12 +352,15 @@ abstract class SatelliteAudioPipeline(
                         }
                     }
                 }
+                // Force stop audio as something is wrong
+                mediaManager.voicePlayer.forceStop()
             } catch (e: Exception) {
                 Timber.d("Audio stop timed out")
             } finally {
                 withContext(NonCancellable) {
                     sendMessage(buildPlayedMessage())
-                    pipelineRunning.complete(PipelineEndReason.END_OF_PIPELINE)
+                    pipelineStage = PipelineStage.COMPLETED_TTS
+                    handlePipelineEnded()
                 }
             }
         }
@@ -342,6 +389,9 @@ abstract class SatelliteAudioPipeline(
 
         val toastMessage = text.ifEmpty { "Error: $code" }
         config.eventBroadcaster.notifyEvent(Event("recognitionError", toastMessage, code))
+        shouldContinueConversation = false
+
+        sendMessage(buildAudioStopMessage())
         pipelineRunning.complete(PipelineEndReason.ERRORED)
     }
 
@@ -364,12 +414,12 @@ abstract class SatelliteAudioPipeline(
     /**
      * Initiates a pipeline run.
      */
-    internal fun buildRunPipelineMessage(startStage: PipelineStartStage): WyomingPacket {
+    internal fun buildRunPipelineMessage(startStage: PipelineStartMode): WyomingPacket {
         val packet = WyomingPacket(
             "run-pipeline",
             buildJsonObject {
                 put("name", "VACA ${config.uuid}")
-                put("start_stage", if (startStage == PipelineStartStage.START_LISTENING) "asr" else "tts")
+                put("start_stage", if (startStage == PipelineStartMode.WAKE_WORD_DETECTED || startStage == PipelineStartMode.CONTINUE_CONVERSATION) "asr" else "tts")
                 put("end_stage", "tts")
                 put("restart_on_end", false)
                 putJsonObject("snd_format") {

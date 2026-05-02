@@ -104,6 +104,12 @@ class SatelliteMediaManager(val context: Context, val config: APPConfig) {
             }
         }
 
+        fun forceStop() {
+            if (isRunning()) {
+                VoicePlayerService.sInstance?.stop(true)
+            }
+        }
+
         fun stop() {
             try {
                 context.stopService(voiceService)

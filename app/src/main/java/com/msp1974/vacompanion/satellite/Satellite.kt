@@ -22,14 +22,12 @@ import com.msp1974.vacompanion.wyoming.WyomingPacket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -43,7 +41,6 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 interface ISatelliteEvent {
@@ -56,7 +53,6 @@ enum class AudioRouteOption { NONE, DETECT, STREAM}
 
 abstract class Satellite(var context: Context, val config: APPConfig, val scope: CoroutineScope, clientIdString: String, val deviceInfo: DeviceCapabilitiesData): ISatelliteEvent {
 
-    private val json = Json { ignoreUnknownKeys = true }
     var clientId = clientIdString
     val mediaManager: SatelliteMediaManager = SatelliteMediaManager(context, config)
 
@@ -73,10 +69,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private var audioPipelineLastStateChange = System.currentTimeMillis()
 
     private var soundEffectFinishTime: Long = 0
-
-
-    @OptIn(ExperimentalAtomicApi::class)
-    private var continueConversation = AtomicBoolean(false)
 
     var state: SatelliteState = SatelliteState.STOPPED
         set(value) {
@@ -183,10 +175,11 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     suspend fun processMessage(packet: WyomingPacket) {
         when (packet.type) {
             "custom-event" -> customEventHandler(clientId, packet)
-            "audio-start" -> handleAudioStart(packet)
             else -> {
                 if (audioPipeline != null && audioPipeline?.pipelineStage != PipelineStage.ENDED) {
                     audioPipeline?.processAudioPipelineMessage(packet)
+                } else if (packet.type == "audio-start") {
+                    handleAudioStart(packet)
                 }
             }
         }
@@ -227,7 +220,6 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
                 override suspend fun onStopWordDetected(detection: WakeWordEngineProvider.WakeWordDetection) {
                     if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.STREAMING_TTS) {
-                        continueConversation.store(false)
                         audioPipeline?.stop()
                         audioPipeline = null
                     }
@@ -289,8 +281,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             if (config.screenOnWakeWord) {
                 config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
             }
-            sendWakeWordDetection()
-            startAudioPipeline(PipelineStartStage.START_LISTENING, continuation = false)
+            startAudioPipeline(PipelineStartMode.WAKE_WORD_DETECTED)
             playWakeWordDetectionSound()
         }
     }
@@ -346,23 +337,18 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
 
 suspend fun handleAudioStart(packet: WyomingPacket) {
-    if (audioPipeline != null && audioPipeline?.pipelineStage != PipelineStage.ENDED) {
-        audioPipeline?.processAudioPipelineMessage(packet)
-    } else {
-        startAudioPipeline(PipelineStartStage.START_STREAM_TTS, false)
-        audioPipeline?.processAudioPipelineMessage(packet)
-    }
+    startAudioPipeline(PipelineStartMode.START_STREAM_TTS)
+    audioPipeline?.processAudioPipelineMessage(packet)
 }
 
     @OptIn(ExperimentalAtomicApi::class)
-    fun startAudioPipeline(startStage: PipelineStartStage, continuation: Boolean) {
+    fun startAudioPipeline(startStage: PipelineStartMode) {
         if (audioPipeline != null) {
             audioPipeline?.stop()
             audioPipeline = null
         }
-        continueConversation.store(config.continueConversation)
         val pipelineId = audioPipelineId.getAndAdd(1)
-        audioPipeline = object: SatelliteAudioPipeline(context, scope, config, pipelineId, mediaManager, isContinuation = continuation) {
+        audioPipeline = object: SatelliteAudioPipeline(context, scope, config, pipelineId, mediaManager) {
             override fun sendMessage(packet: WyomingPacket) {
                 sendSatelliteMessage(clientId, packet.type, packet.data, packet.payload)
             }
@@ -379,21 +365,26 @@ suspend fun handleAudioStart(packet: WyomingPacket) {
                         if (wakeWordHandler?.engine!!.isStreaming()) {
                             wakeWordHandler?.engine!!.setStreaming(false)
                         }
-                        audioPipeline?.stop()
-                        audioPipeline = null
-                        if (continueConversation.load()) {
-                            startAudioPipeline(PipelineStartStage.START_LISTENING, continuation = true)
-                        }
                     }
                     else -> {}
                 }
             }
 
-            override fun onFinish(reason: PipelineEndReason) {
-                if (reason != PipelineEndReason.END_OF_PIPELINE) {
-                    continueConversation.store(false)
+            override fun onFinish(reason: PipelineEndReason, continueConversation: Boolean) {
+                if (reason == PipelineEndReason.END_OF_PIPELINE) {
+                    Timber.i("Pipeline ended.  Restarting: $continueConversation")
+                    if (continueConversation) {
+                        scope.launch {
+                            while (mediaManager.voicePlayer.isRunning()) {
+                                delay(10)
+                            }
+                            startAudioPipeline(PipelineStartMode.CONTINUE_CONVERSATION)
+                        }
+                    } else {
+                        audioPipeline = null
+                    }
                 }
-                if ((reason == PipelineEndReason.ERRORED || reason == PipelineEndReason.TIMED_OUT) && config.wakeWordSound != "none") {
+                if (reason == PipelineEndReason.ERRORED && config.wakeWordSound != "none") {
                     playErrorSound()
                 }
             }
@@ -433,21 +424,6 @@ suspend fun handleAudioStart(packet: WyomingPacket) {
         runCatching {
             val payloadStr = packet.getProp("payload")
             when (action) {
-                "intent-output" -> {
-                    if (audioPipeline != null && audioPipeline?.pipelineStage == PipelineStage.AWAITING_RESPONSE && !continueConversation.load()) {
-                        if (packet.getProp("data") != "") {
-                            val data = json.parseToJsonElement(packet.getProp("data")).jsonObject
-                            val intentOutput = data.get("intent_output")?.jsonObject
-                            if (intentOutput != null) {
-                                continueConversation.store(
-                                    intentOutput["continue_conversation"]?.jsonPrimitive?.boolean
-                                        ?: config.continueConversation
-                                )
-                            }
-                            Timber.d("Continue conversation: $continueConversation")
-                        }
-                    }
-                }
                 "play-media", "play", "pause", "stop", "set-volume" -> { handleMediaPlayerAction(action, payloadStr) }
                 "toast-message" -> if (payloadStr.isNotEmpty()) {
                     val msg = Json.parseToJsonElement(payloadStr).jsonObject["message"]?.jsonPrimitive?.content ?: ""
@@ -524,18 +500,6 @@ suspend fun handleAudioStart(packet: WyomingPacket) {
                 }
             }
         })
-    }
-
-    fun sendWakeWordDetection() {
-        //status.pipelineStatus = PipelineStatus.LISTENING
-        sendEvent(
-            "detection",
-            buildJsonObject {
-                put("name", config.wakeWord)
-                put("timestamp", DateTimeFormatter.ISO_INSTANT.format(Instant.now()))
-                put("speaker", "")
-            }
-        )
     }
 
     fun sendEvent(type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
