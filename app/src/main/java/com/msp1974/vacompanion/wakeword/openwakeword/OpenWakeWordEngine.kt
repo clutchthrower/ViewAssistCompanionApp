@@ -156,7 +156,6 @@ class OpenWakeWordEngine(
                             emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audio)))
                         }
 
-                        // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer
                         if (isStreaming) {
                             val a = AudioDSP().floatArrayToByteBuffer(audio)
                             emit(AudioResult.Audio(ByteString.copyFrom(a), timestamp = frameTimestamp))
@@ -188,11 +187,6 @@ class OpenWakeWordEngine(
                 try {
                     val score = processor.process(audioFeatures)
                     if (score > model.threshold) {
-                        Timber.d(
-                            "DETECTION! ${model.name} - Score: ${
-                                String.format("%.5f", score)
-                            } > Threshold: ${String.format("%.5f", model.threshold)}"
-                        )
                         detections.add(
                             WakeWordDetection(
                                 model.name,

@@ -44,6 +44,7 @@ enum class PipelineStage {
 
 enum class PipelineStartMode {
     WAKE_WORD_DETECTED,
+    REQUESTED_BY_SERVER,
     CONTINUE_CONVERSATION,
     START_STREAM_TTS
 }
@@ -156,6 +157,11 @@ abstract class SatelliteAudioPipeline(
                         sendMessage(buildRunPipelineMessage(pipelineStartMode))
                     }
                     PipelineStartMode.START_STREAM_TTS -> {
+                        shouldContinueConversation = false
+                    }
+
+                    PipelineStartMode.REQUESTED_BY_SERVER -> {
+                        silenceAudioBefore = 1L
                         shouldContinueConversation = false
                     }
                 }
@@ -314,9 +320,14 @@ abstract class SatelliteAudioPipeline(
         val rate = msg.getProp("rate").toInt()
         val width = msg.getProp("width").toInt()
         val channels = msg.getProp("channels").toInt()
-        mediaManager.voicePlayer.play(rate,width,channels)
         try {
             withTimeout(1000) {
+                while (!mediaManager.voicePlayer.isRunning()) {
+                    delay(50)
+                }
+            }
+            withTimeout(1000) {
+                mediaManager.voicePlayer.play(rate,width,channels)
                 while (!mediaManager.voicePlayer.isReady()) {
                     delay(50)
                 }

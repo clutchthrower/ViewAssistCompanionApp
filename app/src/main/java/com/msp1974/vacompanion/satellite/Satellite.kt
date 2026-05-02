@@ -180,6 +180,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                     audioPipeline?.processAudioPipelineMessage(packet)
                 } else if (packet.type == "audio-start") {
                     handleAudioStart(packet)
+                } else if (packet.type == "transcribe") {
+                    handleTranscribe(packet)
                 }
             }
         }
@@ -336,10 +338,15 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
 
-suspend fun handleAudioStart(packet: WyomingPacket) {
-    startAudioPipeline(PipelineStartMode.START_STREAM_TTS)
-    audioPipeline?.processAudioPipelineMessage(packet)
-}
+    suspend fun handleAudioStart(packet: WyomingPacket) {
+        startAudioPipeline(PipelineStartMode.START_STREAM_TTS)
+        audioPipeline?.processAudioPipelineMessage(packet)
+    }
+
+    suspend fun handleTranscribe(packet: WyomingPacket) {
+        startAudioPipeline(PipelineStartMode.REQUESTED_BY_SERVER)
+        audioPipeline?.processAudioPipelineMessage(packet)
+    }
 
     @OptIn(ExperimentalAtomicApi::class)
     fun startAudioPipeline(startStage: PipelineStartMode) {
