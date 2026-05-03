@@ -17,7 +17,8 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
 
     @OptIn(ExperimentalSerializationApi::class)
     fun buildInfo(): JsonObject {
-        val owwWakeWords = WakeWords(context).getWakeWords()
+        val owwWakeWords = WakeWords(context, "onnx").getWakeWords()
+        val owwRTWakeWords = WakeWords(context, "tflite").getWakeWords()
 
         return buildJsonObject {
             put("version", config.version)
@@ -39,6 +40,18 @@ class WyomingInfoBuilder(private val context: Context, private val config: APPCo
                                 put("name", key)
                                 putJsonObject("attribution") {
                                     put("name", "openwakeword")
+                                    put("url", "")
+                                }
+                                put("installed", true)
+                                putJsonArray("languages") { add(JsonPrimitive("en")) }
+                                put("phrase", value.name)
+                            })
+                        }
+                        owwRTWakeWords.forEach { (key, value) ->
+                            add(buildJsonObject {
+                                put("name", key)
+                                putJsonObject("attribution") {
+                                    put("name", "openwakeword-rt")
                                     put("url", "")
                                 }
                                 put("installed", true)

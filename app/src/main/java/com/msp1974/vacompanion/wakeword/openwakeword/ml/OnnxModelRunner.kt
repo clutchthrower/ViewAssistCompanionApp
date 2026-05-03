@@ -14,7 +14,7 @@ import kotlin.io.path.Path
 internal class OnnxModelRunner(
     private val assetManager: AssetManager,
     private val model: WakeWordModel
-) : AutoCloseable {
+) : ModelRunner {
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private var session: OrtSession = createSession()
@@ -31,7 +31,7 @@ internal class OnnxModelRunner(
         }
     }
 
-    private fun loadModel(model: WakeWordModel): ByteArray {
+    override fun loadModel(model: WakeWordModel): ByteArray {
         if (model.builtIn) {
             assetManager.open(model.modelPath).use { inputStream ->
                 return inputStream.readBytes()
@@ -48,7 +48,7 @@ internal class OnnxModelRunner(
      * @param inputArray 3D float array of shape [1, features, embeddings]
      * @return Prediction score between 0.0 and 1.0
      */
-    fun predictWakeWord(inputArray: Array<Array<FloatArray>>): Float {
+    override fun predictWakeWord(inputArray: Array<Array<FloatArray>>): Float {
         var inputTensor: OnnxTensor? = null
 
         try {

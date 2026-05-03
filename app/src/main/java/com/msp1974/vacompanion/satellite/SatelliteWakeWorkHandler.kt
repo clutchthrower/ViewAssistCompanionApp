@@ -86,12 +86,17 @@ abstract class SatelliteWakeWorkHandler(val context: Context, val config: APPCon
         try {
             if (config.wakeWordEngine != "none") {
                 state = WakeWordHandlerState.STARTING
-                engine = WakeWordEngine(context, config,  if (config.wakeWordEngine == "openwakeword") WakeWordEngineModel.OPENWAKEWORD else WakeWordEngineModel.MICROWAKEWORD)
+                engine = WakeWordEngine(context, config,
+                    when (config.wakeWordEngine) {
+                        "openwakeword" -> WakeWordEngineModel.OPENWAKEWORD
+                        "openwakeword-rt" -> WakeWordEngineModel.OPENWAKEWORD_RT
+                        else -> WakeWordEngineModel.MICROWAKEWORD
+                    }
+                )
                 engine?.setActiveWakeWords(listOf(config.wakeWord))
                 engine?.setActiveStopWords(listOf("stop"))
                 runWakeWordDetection()
             }
-            //TODO: Openwakeword reports running too soon
             state = WakeWordHandlerState.RUNNING
             awaitCancellation()
         } finally {

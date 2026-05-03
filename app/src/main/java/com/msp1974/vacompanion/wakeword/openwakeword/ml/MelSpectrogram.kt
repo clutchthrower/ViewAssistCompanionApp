@@ -1,29 +1,32 @@
 package com.msp1974.vacompanion.wakeword.openwakeword.ml
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import android.content.res.AssetManager
+import com.msp1974.vacompanion.utils.loadMappedAsset
+import org.tensorflow.lite.Interpreter
 import java.nio.FloatBuffer
 
 /**
- * Handles mel-spectrogram computation using ONNX model.
+ * Handles mel-spectrogram computation using TFLite model.
  */
 internal class MelSpectrogram(
-    private val assetManager: AssetManager
+    assetManager: AssetManager
 ) : AutoCloseable {
 
     companion object {
-        private const val MEL_SPECTROGRAM_MODEL = "openwakeword/melspectrogram.onnx"
+        private const val MEL_SPECTROGRAM_MODEL = "openwakeword/melspectrogram.tflite"
         private const val BATCH_SIZE = 1
     }
 
-    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    var session: OrtSession? = null
-    private val modelBytes: ByteArray = assetManager.open(MEL_SPECTROGRAM_MODEL).use { inputStream ->
-        inputStream.readBytes()
-    }
+    private val interpreter: Interpreter
 
+    init {
+        val model = assetManager.loadMappedAsset(MEL_SPECTROGRAM_MODEL)
+        try {
+            interpreter = Interpreter(model)
+        } catch (e: Exception) {
+            throw RuntimeException("Failed to initialize TFLite interpreter for MelSpectrogram: ${e.message}", e)
+        }
+    }
 
     /**
      * Compute mel-spectrogram from audio samples.
@@ -32,33 +35,33 @@ internal class MelSpectrogram(
      * @return 2D array representing mel-spectrogram
      */
     fun computeMelSpectrogram(audioSamples: FloatArray): Array<FloatArray> {
-        var inputTensor: OnnxTensor? = null
-
         try {
-            if (session == null) {
-                val sessionOptions = OrtSession.SessionOptions()
-                sessionOptions.setInterOpNumThreads(1)
-                sessionOptions.setIntraOpNumThreads(1)
-                session = env.createSession(modelBytes, sessionOptions)
-            }
-
+            // Explicitly resize input and allocate tensors to get correct output shape
             val floatBuffer = FloatBuffer.wrap(audioSamples)
-            inputTensor = OnnxTensor.createTensor(
-                env,
-                floatBuffer,
-                longArrayOf(BATCH_SIZE.toLong(), audioSamples.size.toLong())
-            )
+            interpreter.resizeInput(0, intArrayOf(BATCH_SIZE, audioSamples.size), true)
+            interpreter.allocateTensors()
 
-            session!!.run(mapOf(session?.inputNames?.first() to inputTensor)).use { results ->
-                val outputTensor = results[0].value as Array<Array<Array<FloatArray>>>
-                // Squeeze dimensions and apply transform
-                return applyMelSpecTransform(squeeze(outputTensor))
+            val outputDetails = interpreter.getOutputTensor(0)
+            val outputShape = outputDetails.shape() 
+            
+            // Allocate output buffer based on the updated shape
+            val output = Array(outputShape[0]) {
+                Array(outputShape[1]) {
+                    Array(outputShape[2]) {
+                        FloatArray(outputShape[3])
+                    }
+                }
             }
+
+            val inputs = arrayOf<Any>(floatBuffer)
+            val outputs = mutableMapOf<Int, Any>(0 to output)
+            
+            interpreter.runForMultipleInputsOutputs(inputs, outputs)
+            
+            // Squeeze dimensions and apply transform
+            return applyMelSpecTransform(squeeze(output))
         } catch (e: Exception) {
-            throw RuntimeException("Failed to compute mel-spectrogram", e)
-        } finally {
-            inputTensor?.close()
-            //session?.close()
+            throw RuntimeException("Failed to compute mel-spectrogram: ${e.message}", e)
         }
     }
 
@@ -80,7 +83,6 @@ internal class MelSpectrogram(
     }
 
     override fun close() {
-        // env is managed globally by OrtEnvironment
-        session?.close()
+        interpreter.close()
     }
 }

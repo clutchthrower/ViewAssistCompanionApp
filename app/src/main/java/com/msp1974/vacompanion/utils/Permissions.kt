@@ -16,7 +16,6 @@ import com.msp1974.vacompanion.VACADeviceAdminReceiver
 import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
 import timber.log.Timber
-import javax.inject.Inject
 
 class Permissions(val context: Context, val config: APPConfig) {
 

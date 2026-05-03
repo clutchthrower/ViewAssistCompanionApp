@@ -9,10 +9,10 @@ import com.msp1974.vacompanion.wakeword.openwakeword.OpenWakeWordEngine
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordDetection
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.takeWhile
+import timber.log.Timber
 
 data class WakeWord(val name: String, val fileName: String, val builtIn: Boolean = true)
-enum class WakeWordEngineModel {MICROWAKEWORD, OPENWAKEWORD}
+enum class WakeWordEngineModel {MICROWAKEWORD, OPENWAKEWORD, OPENWAKEWORD_RT}
 
 open class WakeWordEngine(val context: Context, val config: APPConfig, val engine: WakeWordEngineModel) {
 
@@ -22,29 +22,54 @@ open class WakeWordEngine(val context: Context, val config: APPConfig, val engin
 
 
     private suspend fun get(): WakeWordEngineProvider? {
-        if (engine == WakeWordEngineModel.MICROWAKEWORD) {
-            val availableWakeWords = AssetWakeWordProvider(context.assets, "microwakeword/wakeWords").get()
-            val availableStopWords = AssetWakeWordProvider(context.assets, "microwakeword/stopWords").get()
-            return MicroWakeWordEngine(context, config, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.isMuted)
-        } else if (engine == WakeWordEngineModel.OPENWAKEWORD){
-            val wakeWords = WakeWords(context).getWakeWords()
-            if (config.wakeWord in wakeWords.keys) {
-                val wakeWordInfo = wakeWords[config.wakeWord]!!
-                val models = listOf(
-                    WakeWordModel(
-                        name = wakeWordInfo.name,
-                        modelPath = wakeWordInfo.fileName,
-                        builtIn = wakeWordInfo.builtIn,
-                        threshold = config.wakeWordThreshold
+        Timber.i("Starting ${config.wakeWordEngine} wake word engine")
+        when(engine) {
+            WakeWordEngineModel.MICROWAKEWORD -> {
+                val availableWakeWords = AssetWakeWordProvider(context.assets, "microwakeword/wakeWords").get()
+                val availableStopWords = AssetWakeWordProvider(context.assets, "microwakeword/stopWords").get()
+                return MicroWakeWordEngine(context, config, activeWakeWords, activeStopWords, availableWakeWords, availableStopWords, muted = config.isMuted)
+            }
+            WakeWordEngineModel.OPENWAKEWORD -> {
+                val wakeWords = WakeWords(context, "onnx").getWakeWords()
+                if (config.wakeWord in wakeWords.keys) {
+                    val wakeWordInfo = wakeWords[config.wakeWord]!!
+                    val models = listOf(
+                        WakeWordModel(
+                            name = wakeWordInfo.name,
+                            modelPath = wakeWordInfo.fileName,
+                            builtIn = wakeWordInfo.builtIn,
+                            threshold = config.wakeWordThreshold
+                        )
                     )
-                )
-                return OpenWakeWordEngine(
-                    context = context,
-                    config = config,
-                    models = models,
-                    detectionCooldownMs = 1500L,
-                    muted = config.isMuted
-                )
+                    return OpenWakeWordEngine(
+                        context = context,
+                        config = config,
+                        models = models,
+                        detectionCooldownMs = 1500L,
+                        muted = config.isMuted
+                    )
+                }
+            }
+            WakeWordEngineModel.OPENWAKEWORD_RT -> {
+                val wakeWords = WakeWords(context, "tflite").getWakeWords()
+                if (config.wakeWord in wakeWords.keys) {
+                    val wakeWordInfo = wakeWords[config.wakeWord]!!
+                    val models = listOf(
+                        WakeWordModel(
+                            name = wakeWordInfo.name,
+                            modelPath = wakeWordInfo.fileName,
+                            builtIn = wakeWordInfo.builtIn,
+                            threshold = config.wakeWordThreshold
+                        )
+                    )
+                    return OpenWakeWordEngine(
+                        context = context,
+                        config = config,
+                        models = models,
+                        detectionCooldownMs = 1500L,
+                        muted = config.isMuted
+                    )
+                }
             }
         }
         return null

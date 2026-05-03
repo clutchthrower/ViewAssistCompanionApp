@@ -36,6 +36,8 @@ open class MicroWakeWordEngine (
     private val _availableWakeWords = availableWakeWords.associateBy { it.id }
     private val _availableStopWords = availableStopWords.associateBy { it.id }
 
+    private val detector: MicroWakeWordDetector? = null
+
     private val _activeWakeWords = MutableStateFlow(activeWakeWords)
     val activeWakeWords = _activeWakeWords.asStateFlow()
     override fun setActiveWakeWords(value: List<String>) {
@@ -69,8 +71,9 @@ open class MicroWakeWordEngine (
             val microphoneInput = MicrophoneInput(config, audioSource)
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value
-            var detector = createDetector(wakeWords, stopWords)
+
             try {
+                var detector = createDetector(wakeWords, stopWords)
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))
                 while (true) {
@@ -121,7 +124,7 @@ open class MicroWakeWordEngine (
             } finally {
                 Timber.i("Stopping MicroWakeWordEngine")
                 microphoneInput.close()
-                detector.close()
+                detector?.close()
                 emit(AudioResult.EngineStatus("Stopped"))
             }
         }
@@ -131,9 +134,10 @@ open class MicroWakeWordEngine (
         wakeWords: List<String>,
         stopWords: List<String>
     ) = MicroWakeWordDetector(
-        loadWakeWords(wakeWords, _availableWakeWords) +
-                loadWakeWords(stopWords, _availableStopWords)
-    )
+            loadWakeWords(wakeWords, _availableWakeWords) +
+            loadWakeWords(stopWords, _availableStopWords)
+        )
+
 
     private suspend fun loadWakeWords(
         ids: List<String>,
