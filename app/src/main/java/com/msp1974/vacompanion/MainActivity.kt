@@ -138,6 +138,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         log.i("Starting View Assist Companion App")
         log.i("Version ${config.version}")
         log.i("Android version: ${Helpers.getAndroidVersion()}")
+        log.i("CPU: ${System.getProperty("os.arch")}")
         log.i("Name: ${Helpers.getDeviceName()}")
         log.i("Serial: ${Build.SERIAL}")
         log.i("UUID: ${config.uuid}")
@@ -839,7 +840,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     private fun checkAndRequestWriteSettingsPermission() {
-        if (config.canSetScreenWritePermission && screen.canWriteScreenSetting()) {
+        if (config.canSetScreenWritePermission && !Settings.System.canWrite(applicationContext)) {
             val alertDialog = AlertDialog.Builder(this)
             log.d("Requesting write settings permission")
             alertDialog.apply {
