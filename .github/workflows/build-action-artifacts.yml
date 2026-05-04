@@ -76,6 +76,11 @@ jobs:
 
       # Create APK Signed Release
       - name: Build apk signed release project (APK) - ${{ env.main_project_module }} module
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/app/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Create GitHub Release
