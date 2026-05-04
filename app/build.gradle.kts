@@ -1,5 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
+import kotlin.toString
 
 plugins {
     alias(libs.plugins.android.application)
@@ -9,29 +10,11 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val versionPropsFile = file("../version.properties")
-var version = "0.0.0"
-var code = 0
-
-if (versionPropsFile.canRead()) {
-    val versionProps = Properties()
-    versionProps.load(FileInputStream(versionPropsFile))
-
-    version = versionProps["VERSION"].toString()
-    code = versionProps["VERSION_CODE"].toString().toInt() + 1
-    versionProps["VERSION_CODE"] = code.toString()
-    versionProps.store(versionPropsFile.writer(), null)
-
-
-} else {
-    throw GradleException("Could not read version.properties!")
-}
-
 tasks.register("printVersionName") {
     group = "custom"
     description = "Output version name for use in env vars"
     doLast {
-        println(version)
+        println(android.defaultConfig.versionName)
     }
 }
 
@@ -39,11 +22,26 @@ android {
     namespace = "com.msp1974.vacompanion"
     compileSdk = 36
 
+    val versionPropsFile = file("../version.properties")
+    var code = 0
+
+    if (versionPropsFile.canRead()) {
+        val versionProps = Properties()
+        versionProps.load(FileInputStream(versionPropsFile))
+        code = versionProps["VERSION_CODE"].toString().toInt() + 1
+        versionProps["VERSION_CODE"] = code.toString()
+        versionProps.store(versionPropsFile.writer(), null)
+
+
+    } else {
+        throw GradleException("Could not read version.properties!")
+    }
+
     defaultConfig {
         applicationId = "com.msp1974.vacompanion"
         minSdk = 26
         targetSdk = 36
-        versionName = version
+        versionName = "0.11.0-rc2"
         versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
