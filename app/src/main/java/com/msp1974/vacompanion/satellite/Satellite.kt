@@ -16,6 +16,7 @@ import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.device.ScreenUtils
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.Helpers
+import com.msp1974.vacompanion.wakeword.WakeWordDownloader
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wyoming.SatelliteState
 import com.msp1974.vacompanion.wyoming.WyomingPacket
@@ -64,6 +65,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     private val eventHandler = SatelliteCustomEventHandler(context, config, scope, this)
 
     private var wakeWordHandler: SatelliteWakeWorkHandler? = null
+    private var wakeWordDownloader = WakeWordDownloader(context, config)
     private var audioPipeline: SatelliteAudioPipeline? = null
     private var audioPipelineId = AtomicInteger(0)
     private var audioPipelineLastStateChange = System.currentTimeMillis()
@@ -95,6 +97,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 return
             }
         }
+
+        // Not ready for release
+        //wakeWordDownloader.downloadsNeeded(config.customFiles)
 
         volumeObserver = VolumeObserver(context) { musicVolume, notificationVolume ->
             if (config.musicVolume != musicVolume) {
@@ -199,6 +204,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         }
 
         Timber.d("Starting Wake Word Detection")
+        sendDiagnostics(0f, 0f)
         withContext(Dispatchers.Default) {
             wakeWordHandler = object : SatelliteWakeWorkHandler(context, config, scope) {
                 override fun onStateChange(state: WakeWordHandlerState) {

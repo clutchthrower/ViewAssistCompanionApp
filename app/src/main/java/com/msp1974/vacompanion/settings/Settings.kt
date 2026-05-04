@@ -233,6 +233,13 @@ class APPConfig @Inject constructor(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var customFiles: JsonElement by Delegates.observable(buildJsonObject {
+        putJsonArray("microwakeword") {}
+        putJsonArray("openwakeword") {}
+    }) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
 
     // SharedPreferences
     var canSetScreenWritePermission: Boolean
@@ -312,6 +319,7 @@ class APPConfig @Inject constructor(val context: Context) {
         settings["screen_saver"]?.jsonPrimitive?.booleanOrNull?.let { screenSaver = it }
         settings["screen_orientation_mode"]?.jsonPrimitive?.contentOrNull?.let { screenOrientationMode = it }
         settings["continue_conversation"]?.jsonPrimitive?.booleanOrNull?.let { continueConversation = it }
+        settings["custom_files"]?.let { customFiles = it }
 
         firebase.addToCrashLog("Settings update")
     }
@@ -366,16 +374,5 @@ class APPConfig @Inject constructor(val context: Context) {
         const val DEFAULT_MUTE = false
         const val DEFAULT_MIC_GAIN = 0
         const val GITHUB_API_URL = "https://api.github.com/repos/msp1974/ViewAssist_Companion_App/releases"
-
-        @Volatile
-        private var instance: APPConfig? = null
-
-        /*
-        fun getInstance(context: Context) =
-            instance ?: synchronized(this) {
-                instance ?: APPConfig(context).also { instance = it }
-            }
-
-         */
     }
 }
