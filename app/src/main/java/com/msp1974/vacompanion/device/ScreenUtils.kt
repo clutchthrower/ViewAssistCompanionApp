@@ -1,4 +1,4 @@
-package com.msp1974.vacompanion.utils
+package com.msp1974.vacompanion.device
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -13,12 +13,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.FirebaseManager
+import com.msp1974.vacompanion.utils.Logger
+import javax.inject.Inject
 
-
-class ScreenUtils(val context: Context) : ContextWrapper(context) {
+class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper(context) {
     var log = Logger()
-    private val firebase = FirebaseManager.getInstance(context)
-    var config = APPConfig.getInstance(context)
+    private val firebase = FirebaseManager.Companion.getInstance(context)
+
     private var wakeLock: PowerManager.WakeLock? = null
     var initBrightness: Float = 0f
 

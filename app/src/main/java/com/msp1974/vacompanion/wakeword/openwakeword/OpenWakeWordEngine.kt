@@ -8,16 +8,18 @@ import androidx.annotation.RequiresPermission
 import com.google.protobuf.ByteString
 import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.audio.VACAAudioFormat
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wakeword.openwakeword.audio.AudioProcessor
+import com.msp1974.vacompanion.wakeword.openwakeword.ml.ModelRunner
 import com.msp1974.vacompanion.wakeword.openwakeword.ml.OnnxModelRunner
+import com.msp1974.vacompanion.wakeword.openwakeword.ml.TfliteModelRunner
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
-import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordScore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import timber.log.Timber
-import kotlin.math.abs
 
 
 /**
@@ -28,12 +30,12 @@ import kotlin.math.abs
  */
 class OpenWakeWordEngine(
     private val context: Context,
+    val config: APPConfig,
     private val models: List<WakeWordModel>,
     private val detectionCooldownMs: Long = 2000L,
     muted: Boolean = false
 ): WakeWordEngineProvider() {
 
-    private val config = APPConfig.getInstance(context)
     private val assetManager: AssetManager = context.assets
     private val modelProcessors = mutableMapOf<WakeWordModel, ModelProcessor>()
     private val detectionCooldowns = mutableMapOf<String, Long>()
@@ -91,7 +93,7 @@ class OpenWakeWordEngine(
 
     private fun initializeModels() {
         models.forEach { model ->
-            val processor = ModelProcessor(assetManager, model)
+            val processor = ModelProcessor(assetManager, config.wakeWordEngine, model)
             modelProcessors[model] = processor
         }
     }
@@ -106,7 +108,7 @@ class OpenWakeWordEngine(
                 throw IllegalArgumentException("Model with name ${model.name} already exists")
             }
         }
-        modelProcessors[model] = ModelProcessor(assetManager, model)
+        modelProcessors[model] = ModelProcessor(assetManager, config.wakeWordEngine, model)
     }
 
     fun removeModel(modelName: String) {
@@ -139,12 +141,15 @@ class OpenWakeWordEngine(
     override fun start() = muted.flatMapLatest {
         if (it) emptyFlow()
         else flow {
-            val microphoneInput = MicrophoneInput(frameSize = 1280)
+            val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
+            val audioSource = if(isEmbedded) VACAAudioFormat.FALLBACK_AUDIO_SOURCE else VACAAudioFormat.DEFAULT_AUDIO_SOURCE
+            val microphoneInput = MicrophoneInput(config, audioSource, frameSize = 1280)
             try {
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))
                 while (true) {
                     val audio = microphoneInput.readFloat()
+                    val frameTimestamp = System.currentTimeMillis()
 
                     if (audio.isNotEmpty()) {
 
@@ -154,10 +159,15 @@ class OpenWakeWordEngine(
 
                         if (isStreaming) {
                             val a = AudioDSP().floatArrayToByteBuffer(audio)
-                            emit(AudioResult.Audio(ByteString.copyFrom(a)))
+                            emit(
+                                AudioResult.Audio(
+                                    ByteString.copyFrom(a),
+                                    timestamp = frameTimestamp
+                                )
+                            )
                         }
 
-                        val detections = processAudio(audio)
+                        val detections = processAudio(audio, frameTimestamp)
                         for (detection in detections) {
                             if (detection.detected) {
                                 emit(AudioResult.WakeDetected(detection))
@@ -166,6 +176,10 @@ class OpenWakeWordEngine(
                     }
                     yield()
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                Timber.e("Runtime exception thrown by wake word engine: $e")
             } finally {
                 microphoneInput.close()
                 emit(AudioResult.EngineStatus("Stopped"))
@@ -174,7 +188,7 @@ class OpenWakeWordEngine(
     }
 
     @SuppressLint("DefaultLocale")
-    fun processAudio(audioBuffer: FloatArray): List<WakeWordDetection> {
+    fun processAudio(audioBuffer: FloatArray, timestamp: Long = System.currentTimeMillis()): List<WakeWordDetection> {
         val detections = mutableListOf<WakeWordDetection>()
 
         if (isEnabled) {
@@ -183,20 +197,18 @@ class OpenWakeWordEngine(
                 try {
                     val score = processor.process(audioFeatures)
                     if (score > model.threshold) {
-                        Timber.d(
-                            "DETECTION! ${model.name} - Score: ${
-                                String.format("%.5f", score)
-                            } > Threshold: ${String.format("%.5f", model.threshold)}"
-                        )
                         detections.add(
                             WakeWordDetection(
                                 model.name,
                                 model.name,
                                 isWakeWordDetected(model, score),
-                                score
+                                score,
+                                timestamp = timestamp
                             )
                         )
                     }
+                } catch (e: RuntimeException) {
+                    throw e
                 } catch (e: Exception) {
                     Timber.e("Error processing model ${model.name} ->$e")
                     e.printStackTrace()
@@ -278,12 +290,18 @@ class OpenWakeWordEngine(
     /**
      * Internal class to process audio for a specific model.
      */
-    private inner class ModelProcessor(
+    private class ModelProcessor(
         assetManager: AssetManager,
+        engine: String,
         model: WakeWordModel
     ) : AutoCloseable {
 
-        private val modelRunner = OnnxModelRunner(assetManager, model)
+        private val modelRunner = getModelRunner(engine, assetManager, model)
+
+        fun getModelRunner(engine: String, assetManager: AssetManager, model: WakeWordModel): ModelRunner {
+            return if (engine == "openwakeword") OnnxModelRunner(assetManager, model)
+            else TfliteModelRunner(assetManager, model)
+        }
 
         fun process(audioFeatures: Array<Array<FloatArray>>): Float {
             val score = modelRunner.predictWakeWord(audioFeatures)

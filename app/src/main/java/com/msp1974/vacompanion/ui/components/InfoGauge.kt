@@ -1,6 +1,5 @@
 package com.msp1974.vacompanion.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +33,8 @@ import com.msp1974.vacompanion.ui.theme.CustomColours
 fun InfoGauge(
     canvasSize: Dp = 150.dp,
     indicatorValue: Int = 0,
+    disabled: Boolean = false,
+    disabledText: String = "",
     maxIndicatorValue: Int = 100,
     backgroundIndicatorColor: Color = Color.White.copy(alpha = 0.3f),
     indicatorStrokeWidth: Float = 20f,
@@ -104,7 +104,9 @@ fun InfoGauge(
             bigTextSuffix = bigTextSuffix,
             smallText = smallText,
             smallTextColor = smallTextColor,
-            smallTextFontSize = smallTextFontSize
+            smallTextFontSize = smallTextFontSize,
+            disabled = disabled,
+            disabledText = disabledText
         )
     }
 }
@@ -164,7 +166,9 @@ fun EmbeddedElements(
     bigTextSuffix: String,
     smallText: String,
     smallTextColor: Color,
-    smallTextFontSize: TextUnit
+    smallTextFontSize: TextUnit,
+    disabled: Boolean,
+    disabledText: String
 ) {
     Text(
         modifier = Modifier.padding(top = 20.dp),
@@ -173,13 +177,23 @@ fun EmbeddedElements(
         fontSize = smallTextFontSize,
         textAlign = TextAlign.Center
     )
-    Text(
-        text = if (bigTextSuffix.isEmpty()) "$bigText" else "$bigText ${bigTextSuffix.take(2)}",
-        color = bigTextColor,
-        fontSize = bigTextFontSize,
-        textAlign = TextAlign.Center,
-        fontWeight = FontWeight.Bold
-    )
+    if (disabled) {
+        Text(
+            text = disabledText,
+            color = bigTextColor,
+            fontSize = smallTextFontSize,
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Bold
+        )
+    } else {
+        Text(
+            text = if (bigTextSuffix.isEmpty()) "$bigText" else "$bigText ${bigTextSuffix.take(2)}",
+            color = bigTextColor,
+            fontSize = bigTextFontSize,
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Bold
+        )
+    }
 }
 
 @Composable
@@ -189,5 +203,7 @@ fun InfoGaugePreview() {
         indicatorValue = 5,
         maxIndicatorValue = 10,
         smallText = "Detection",
+        disabledText = "Muted",
+        disabled = true
     )
 }

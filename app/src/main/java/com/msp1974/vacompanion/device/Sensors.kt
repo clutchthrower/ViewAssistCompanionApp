@@ -1,4 +1,4 @@
-package com.msp1974.vacompanion.sensors
+package com.msp1974.vacompanion.device
 
 import android.content.Context
 import android.content.Context.SENSOR_SERVICE
@@ -11,10 +11,11 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.BatteryManager
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Event
 import timber.log.Timber
 import java.util.Timer
+import javax.inject.Inject
+import kotlin.collections.iterator
 import kotlin.concurrent.timer
 import kotlin.math.abs
 
@@ -22,8 +23,8 @@ interface SensorUpdatesCallback {
     fun onUpdate(data: MutableMap<String, Any>)
 }
 
-class Sensors(val context: Context, val cbFunc: SensorUpdatesCallback) {
-    val config = APPConfig.getInstance(context)
+class Sensors(val context: Context, val config: APPConfig, val cbFunc: SensorUpdatesCallback) {
+
     var sensorManager: SensorManager = context.getSystemService(SENSOR_SERVICE) as SensorManager
 
     var orientationSensor: String = ""
@@ -43,7 +44,7 @@ class Sensors(val context: Context, val cbFunc: SensorUpdatesCallback) {
         override fun onSensorChanged(event: SensorEvent) {
             when (event.sensor.type) {
                 Sensor.TYPE_LIGHT -> {
-                    updateFloatSensorData("light", event.values[0].toFloat(), 10f)
+                    updateFloatSensorData("light", event.values[0], 10f)
                 }
                 Sensor.TYPE_ACCELEROMETER -> {
                     if (System.currentTimeMillis() - lastBump > 2000) {
@@ -87,7 +88,7 @@ class Sensors(val context: Context, val cbFunc: SensorUpdatesCallback) {
 
     init {
         Timber.d("Starting sensors")
-        val dm = DeviceCapabilitiesManager(context)
+        val dm = DeviceCapabilitiesManager(context, config)
         isRawProximitySensor = dm.getProximitySensorType() == "raw"
         hasBattery = dm.hasBattery()
 
