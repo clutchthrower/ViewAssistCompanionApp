@@ -130,6 +130,12 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                             message: WyomingPacket
                         ) {
                             try {
+                                // Added to prevent processing first message before client handler correctly setup
+                                withTimeout(250) {
+                                    while (clientId !in clients) {
+                                        delay(10)
+                                    }
+                                }
                                 messageHandler(clientId, message)
                             } catch (e: Exception) {
                                 Timber.e("Error processing message: $e")
@@ -141,9 +147,6 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                     clients[id] = Connection(id, client)
                     Timber.d("Client connected: ${socket.remoteAddress}.  Total: ${clients.size}")
                     onEvent("client_connected", data)
-
-                    yield()
-
                 }
             } catch (e: Throwable) {
                 ensureActive()
@@ -242,7 +245,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         respondToGenericMessage(clientId, "capabilities", DeviceCapabilitiesManager.toJson(deviceInfo))
     }
 
-    private suspend fun   startSatellite(clientId: String) {
+    private suspend fun startSatellite(clientId: String) {
         Timber.d("Processing run satellite")
 
         val serverIP = clients[clientId]?.handler?.clientIP ?: ""
