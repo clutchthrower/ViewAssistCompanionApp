@@ -74,13 +74,17 @@ class CustomWebView @JvmOverloads constructor(
         }
 
         // Add JS interfaces
+        removeJavascriptInterface("Android")
         addJavascriptInterface(androidInterface, "Android")
+
         if (webViewClient::class == CustomWebViewClient::class) {
             val webViewClientA = webViewClient as CustomWebViewClient
+            removeJavascriptInterface("ViewAssistApp")
             addJavascriptInterface(WebAppInterface(webViewClientA.config, ViewAssistEventHandler), "ViewAssistApp")
+
+            removeJavascriptInterface("externalApp")
             addJavascriptInterface(WebViewJavascriptInterface(this, AuthUtils(config).externalAuthCallback), "externalApp")
         }
-
     }
 
     val ViewAssistEventHandler = object : ViewAssistCallback {
@@ -137,6 +141,12 @@ class CustomWebView @JvmOverloads constructor(
     fun setPageLoadingState(stage: PageLoadingStage) {
         val w = webViewClient as CustomWebViewClient
         w.setPageLoadingState(stage)
+    }
+
+    fun refresh() {
+        val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
+        log.d("Loading URL: $url")
+        loadUrl(url)
     }
 
     companion object {

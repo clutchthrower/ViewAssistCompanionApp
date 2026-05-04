@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ActivityCompat
@@ -22,16 +21,22 @@ import com.msp1974.vacompanion.VACAApplication
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.BackgroundTaskStatus
 import com.msp1974.vacompanion.utils.FirebaseManager
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Timer
 import java.util.TimerTask
+import javax.inject.Inject
 
+@AndroidEntryPoint
+class VAForegroundService @Inject constructor() : LifecycleService() {
 
-class VAForegroundService : LifecycleService() {
-    private lateinit var config: APPConfig
+    @Inject lateinit var config: APPConfig
+
     private lateinit var firebase: FirebaseManager
-    private var wifiLock: WifiManager.WifiLock? = null
     private var keyguardLock: KeyguardManager.KeyguardLock? = null
     private var watchdogTimer: Timer = Timer()
 
@@ -48,12 +53,8 @@ class VAForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        config = APPConfig.getInstance(this)
         firebase = FirebaseManager.getInstance(this)
 
-        // wifi lock
-        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL, "vacompanion.VABackgroundService:wifiLock")
         // Some Amazon devices are not seeing this permission so we are trying to check
         val permission = "android.permission.DISABLE_KEYGUARD"
         val checkSelfPermission = ContextCompat.checkSelfPermission(this@VAForegroundService, permission)
@@ -86,10 +87,6 @@ class VAForegroundService : LifecycleService() {
                         .setSmallIcon(R.mipmap.ic_launcher)
                         .setContentTitle("View Assist Companion App")
                         .setContentText("Service is running")
-                        .addAction(
-                            R.drawable.outline_stop_circle_24, getString(R.string.stop_service),
-                            stopServiceIntent(Actions.STOP.toString())
-                        )
                         .build()
 
                 lifecycleScope.launch {
@@ -117,9 +114,6 @@ class VAForegroundService : LifecycleService() {
                         },
                     )
 
-                    if (!wifiLock!!.isHeld) {
-                        wifiLock!!.acquire()
-                    }
                     try {
                         keyguardLock?.disableKeyguard()
                     } catch (ex: Exception) {
@@ -128,7 +122,7 @@ class VAForegroundService : LifecycleService() {
                         firebase.logException(ex)
                     }
 
-                    backgroundTask = BackgroundTaskController(this@VAForegroundService)
+                    backgroundTask = BackgroundTaskController(this@VAForegroundService, config)
                     backgroundTask?.start()
                     Timber.i("Background Service Started")
                     config.backgroundTaskRunning = true
@@ -147,13 +141,12 @@ class VAForegroundService : LifecycleService() {
                     //        Timber.e("Foreground service failed to launch activity - ${ex.message}")
                     //    }
                     //}
-                    restartActivityWatchdog()
+                    //restartActivityWatchdog()
                 }
             }
 
             Actions.STOP.toString() -> {
-                firebase.addToCrashLog("Background service stopping")
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                Timber.d("Stopping foreground service")
                 stopSelf()
             }
         }
@@ -198,13 +191,10 @@ class VAForegroundService : LifecycleService() {
         Timber.i("Stopping Background Service")
         watchdogTimer.cancel()
         backgroundTask?.shutdown()
+
         config.backgroundTaskRunning = false
         config.backgroundTaskStatus = BackgroundTaskStatus.NOT_STARTED
 
-        // Release any lock from this app
-        if (wifiLock != null && wifiLock!!.isHeld) {
-            wifiLock!!.release()
-        }
         try {
             keyguardLock!!.reenableKeyguard()
         } catch (ex: Exception) {
@@ -213,5 +203,4 @@ class VAForegroundService : LifecycleService() {
             firebase.logException(ex)
         }
     }
-
 }

@@ -1,27 +1,30 @@
 package com.msp1974.vacompanion.wakeword.openwakeword.ml
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import android.content.res.AssetManager
+import com.msp1974.vacompanion.utils.loadMappedAsset
+import org.tensorflow.lite.Interpreter
 
 /**
- * Handles embedding generation from mel-spectrograms using ONNX model.
+ * Handles embedding generation from mel-spectrograms using TFLite model.
  */
 internal class EmbeddingModel(
-    private val assetManager: AssetManager
+    assetManager: AssetManager
 ) : AutoCloseable {
 
     companion object {
-        private const val EMBEDDING_MODEL = "embedding_model.onnx"
+        private const val EMBEDDING_MODEL = "openwakeword/embedding_model.tflite"
     }
 
-    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    var session: OrtSession? = null
-    private val modelBytes: ByteArray = assetManager.open(EMBEDDING_MODEL).use { inputStream ->
-        inputStream.readBytes()
-    }
+    private val interpreter: Interpreter
 
+    init {
+        val model = assetManager.loadMappedAsset(EMBEDDING_MODEL)
+        try {
+            interpreter = Interpreter(model)
+        } catch (e: Exception) {
+            throw RuntimeException("Failed to initialize TFLite interpreter for EmbeddingModel: ${e.message}", e)
+        }
+    }
 
     /**
      * Generate embeddings from mel-spectrogram windows.
@@ -30,35 +33,37 @@ internal class EmbeddingModel(
      * @return 2D array of embeddings
      */
     fun generateEmbeddings(input: Array<Array<Array<FloatArray>>>): Array<FloatArray> {
-        var inputTensor: OnnxTensor? = null
         try {
-            if (session == null) {
-                val sessionOptions = OrtSession.SessionOptions()
-                sessionOptions.setInterOpNumThreads(1)
-                sessionOptions.setIntraOpNumThreads(1)
-                session = env.createSession(modelBytes, sessionOptions)
-            }
-
-            inputTensor = OnnxTensor.createTensor(env, input)
-
-            session!!.run(mapOf("input_1" to inputTensor)).use { results ->
-                val rawOutput = results[0].value as Array<Array<Array<FloatArray>>>
-
-                // Reshape from (41, 1, 1, 96) to (41, 96)
-                return Array(rawOutput.size) { i ->
-                    rawOutput[i][0][0].copyOf()
+            val batchSize = input.size
+            val height = input[0].size
+            val width = input[0][0].size
+            val channels = input[0][0][0].size
+            
+            interpreter.resizeInput(0, intArrayOf(batchSize, height, width, channels))
+            interpreter.allocateTensors()
+            
+            val outputShape = interpreter.getOutputTensor(0).shape() // Expected [batch, 1, 1, 96]
+            
+            val rawOutput = Array(outputShape[0]) {
+                Array(outputShape[1]) {
+                    Array(outputShape[2]) {
+                        FloatArray(outputShape[3])
+                    }
                 }
             }
+
+            interpreter.run(input, rawOutput)
+
+            // Reshape from (batch, 1, 1, 96) to (batch, 96)
+            return Array(rawOutput.size) { i ->
+                rawOutput[i][0][0].copyOf()
+            }
         } catch (e: Exception) {
-            throw RuntimeException("Failed to generate embeddings", e)
-        } finally {
-            inputTensor?.close()
-            //session?.close()
+            throw RuntimeException("Failed to generate embeddings: ${e.message}", e)
         }
     }
 
     override fun close() {
-        // env is managed globally by OrtEnvironment
-        session?.close()
+        interpreter.close()
     }
 }

@@ -1,10 +1,12 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-//    id("com.google.gms.google-services")
-    id("com.google.firebase.crashlytics")
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
 }
 
 tasks.register("printVersionName") {
@@ -20,31 +22,51 @@ android {
     namespace = "com.msp1974.vacompanion"
     compileSdk = 36
 
+    val versionPropsFile = file("../version.properties")
+    var version = "0.0.0"
+    var code = 0
+
+    if (versionPropsFile.canRead()) {
+        val versionProps = Properties()
+        versionProps.load(FileInputStream(versionPropsFile))
+
+        version = versionProps["VERSION"].toString()
+        code = versionProps["VERSION_CODE"].toString().toInt() + 1
+        versionProps["VERSION_CODE"] = code.toString()
+        versionProps.store(versionPropsFile.writer(), null)
+
+
+    } else {
+        throw GradleException("Could not read version.properties!")
+    }
+
     defaultConfig {
         applicationId = "com.msp1974.vacompanion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.10.0"
+        versionName = version
+        versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
-        ndk {
-            abiFilters.add("arm64-v8a")
-            abiFilters.add("armeabi-v7a")
+
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
         }
     }
 
     buildTypes {
-        applicationVariants.all {
-            this.outputs
-                .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
-                .forEach { output ->
-                    var apkName = "vaca-" + this.versionName + "-" + this.buildType.name + ".apk"
-                    output.outputFileName = apkName
-                }
-        }
         debug {
             isMinifyEnabled = false
+            ndk {
+                abiFilters.add("arm64-v8a")
+                abiFilters.add("armeabi-v7a")
+            }
         }
         release {
             isMinifyEnabled = true
@@ -54,16 +76,26 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("debug")
+            ndk {
+                abiFilters.add("arm64-v8a")
+                abiFilters.add("armeabi-v7a")
+            }
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlin {
-        compilerOptions {
-            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-            optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val name = "vaca-${variant.outputs.first().versionName.get()}-${variant.name}.apk"
+            (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set(name)
         }
     }
 }
@@ -104,7 +136,11 @@ dependencies {
     implementation(libs.litert)
     implementation(libs.protobuf.kotlin)
     implementation(libs.androidx.lifecycle.service)
+    implementation(libs.ktor.network)
+    implementation(libs.androidx.datastore.core)
     testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    androidTestImplementation(libs.mockk.android)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
@@ -116,6 +152,8 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.ui.compose)
-    implementation("com.github.wendykierp:JTransforms:3.2")
+    implementation(libs.jtransforms)
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
 
 }

@@ -19,9 +19,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.msp1974.vacompanion.service.AudioRouteOption
 import com.msp1974.vacompanion.ui.DiagnosticInfo
 import com.msp1974.vacompanion.ui.theme.CustomColours
+import com.msp1974.vacompanion.satellite.AudioRouteOption
 
 
 @SuppressLint("DefaultLocale")
@@ -52,21 +52,23 @@ fun DiagnosticBar(
                 indicatorValue = (diagnosticInfo.audioLevel).toInt(),
                 maxIndicatorValue = 100,
                 smallText = "Mic Level",
-                foregroundIndicatorColor = CustomColours.GREEN
+                foregroundIndicatorColor = CustomColours.GREEN,
+                disabledText = "Muted",
+                disabled = diagnosticInfo.muted
             )
-            if (diagnosticInfo.wakeWord != "none") {
-                InfoGauge(
-                    indicatorValue = (diagnosticInfo.detectionLevel).toInt(),
-                    maxIndicatorValue = 10,
-                    smallText = "Detection",
-                    foregroundIndicatorColor = if (diagnosticInfo.detectionLevel >= diagnosticInfo.detectionThreshold) CustomColours.GREEN else CustomColours.AMBER
-                )
-            }
+            InfoGauge(
+                indicatorValue = (diagnosticInfo.detectionLevel).toInt(),
+                maxIndicatorValue = 10,
+                smallText = "Detection",
+                foregroundIndicatorColor = if (diagnosticInfo.detectionLevel >= diagnosticInfo.detectionThreshold) CustomColours.GREEN else CustomColours.AMBER,
+                disabledText = "Disabled",
+                disabled = diagnosticInfo.wakeWord == "none"
+
+            )
             Column() {
                 AssistChip(
                     onClick = {},
-                    label = { Text(if (diagnosticInfo.engine != "") diagnosticInfo.engine else "DISABLED") },
-                    enabled = diagnosticInfo.wakeWord != "none",
+                    label = { Text(if (diagnosticInfo.engine != "") diagnosticInfo.engine else "Disabled") },
                     colors = AssistChipDefaults.assistChipColors(
                         labelColor = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -74,7 +76,6 @@ fun DiagnosticBar(
                 AssistChip(
                     onClick = {},
                     label = { Text("Detecting" ) },
-                    enabled = diagnosticInfo.wakeWord != "none",
                     colors = AssistChipDefaults.assistChipColors(
                         containerColor = if (diagnosticInfo.mode == AudioRouteOption.DETECT) CustomColours.GREEN else Color.Transparent,
                         labelColor = MaterialTheme.colorScheme.onPrimaryContainer

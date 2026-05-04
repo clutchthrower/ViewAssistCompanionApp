@@ -9,32 +9,34 @@ import com.msp1974.vacompanion.wakeword.microwakeword.models.WakeWordWithId
 import com.google.protobuf.ByteString
 import com.msp1974.vacompanion.audio.AudioDSP
 import com.msp1974.vacompanion.audio.MicrophoneInput
+import com.msp1974.vacompanion.audio.VACAAudioFormat
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.Helpers.Companion.isAndroidThings
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import timber.log.Timber
 import kotlin.collections.plus
 
 open class MicroWakeWordEngine (
     val context: Context,
+    val config: APPConfig,
     activeWakeWords: List<String>,
     activeStopWords: List<String>,
     val availableWakeWords: List<WakeWordWithId>,
     val availableStopWords: List<WakeWordWithId>,
     muted: Boolean = false
 ): WakeWordEngineProvider() {
-    private val config = APPConfig.getInstance(context)
+
     private val _availableWakeWords = availableWakeWords.associateBy { it.id }
     private val _availableStopWords = availableStopWords.associateBy { it.id }
+
+    private val detector: MicroWakeWordDetector? = null
 
     private val _activeWakeWords = MutableStateFlow(activeWakeWords)
     val activeWakeWords = _activeWakeWords.asStateFlow()
@@ -64,12 +66,14 @@ open class MicroWakeWordEngine (
         // Stop microphone when muted
         if (it) emptyFlow()
         else flow {
-            val audioSource = if (isAndroidThings(context)) MicrophoneInput.ANDROID_IOT_AUDIO_SOURCE else MicrophoneInput.DEFAULT_AUDIO_SOURCE
-            val microphoneInput = MicrophoneInput(audioSource = audioSource)
+            val isEmbedded = DeviceCapabilitiesManager(context, config).isAndroidThings()
+            val audioSource = if(isEmbedded) VACAAudioFormat.FALLBACK_AUDIO_SOURCE else VACAAudioFormat.DEFAULT_AUDIO_SOURCE
+            val microphoneInput = MicrophoneInput(config, audioSource)
             var wakeWords = activeWakeWords.value
             var stopWords = activeStopWords.value
-            var detector = createDetector(wakeWords, stopWords)
+
             try {
+                var detector = createDetector(wakeWords, stopWords)
                 microphoneInput.start()
                 emit(AudioResult.EngineStatus("Started"))
                 while (true) {
@@ -81,6 +85,7 @@ open class MicroWakeWordEngine (
                     }
 
                     val audio = microphoneInput.readBytes()
+                    val frameTimestamp = System.currentTimeMillis()
 
                     if (config.diagnosticsEnabled) {
                         val audioByteString = ByteString.copyFrom(audio)
@@ -88,10 +93,14 @@ open class MicroWakeWordEngine (
                         emit(AudioResult.AudioLevel(AudioDSP().audioLevel(audioByteString.toByteArray())))
                     }
 
-
-
+                    // Emit audio result even if not streaming so that the controller can maintain a rolling history buffer
                     if (isStreaming) {
-                        emit(AudioResult.Audio(ByteString.copyFrom(audio)))
+                        emit(
+                            AudioResult.Audio(
+                                ByteString.copyFrom(audio),
+                                timestamp = frameTimestamp
+                            )
+                        )
                         audio.rewind()
                     }
 
@@ -101,9 +110,9 @@ open class MicroWakeWordEngine (
                     for (detection in detections) {
                         if (detection.score > 0.1f) {
                             if (detection.wakeWordId in wakeWords) {
-                                emit(AudioResult.WakeDetected(detection))
+                                emit(AudioResult.WakeDetected(detection.copy(timestamp = frameTimestamp)))
                             } else if (detection.wakeWordId in stopWords) {
-                                emit(AudioResult.StopDetected(detection))
+                                emit(AudioResult.StopDetected(detection.copy(timestamp = frameTimestamp)))
                             }
                         }
                     }
@@ -113,11 +122,9 @@ open class MicroWakeWordEngine (
                     yield()
                 }
             } finally {
-                withContext(NonCancellable) {
-                    Timber.i("Stopping MicroWakeWordEngine")
-                    microphoneInput.close()
-                    detector.close()
-                }
+                Timber.i("Stopping MicroWakeWordEngine")
+                microphoneInput.close()
+                detector?.close()
                 emit(AudioResult.EngineStatus("Stopped"))
             }
         }
@@ -127,9 +134,10 @@ open class MicroWakeWordEngine (
         wakeWords: List<String>,
         stopWords: List<String>
     ) = MicroWakeWordDetector(
-        loadWakeWords(wakeWords, _availableWakeWords) +
-                loadWakeWords(stopWords, _availableStopWords)
-    )
+            loadWakeWords(wakeWords, _availableWakeWords) +
+            loadWakeWords(stopWords, _availableStopWords)
+        )
+
 
     private suspend fun loadWakeWords(
         ids: List<String>,
