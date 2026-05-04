@@ -9,36 +9,35 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val versionPropsFile = file("../version.properties")
+var version = "0.0.0"
+var code = 0
+
+if (versionPropsFile.canRead()) {
+    val versionProps = Properties()
+    versionProps.load(FileInputStream(versionPropsFile))
+
+    version = versionProps["VERSION"].toString()
+    code = versionProps["VERSION_CODE"].toString().toInt() + 1
+    versionProps["VERSION_CODE"] = code.toString()
+    versionProps.store(versionPropsFile.writer(), null)
+
+
+} else {
+    throw GradleException("Could not read version.properties!")
+}
+
 tasks.register("printVersionName") {
     group = "custom"
     description = "Output version name for use in env vars"
-
     doLast {
-        println(android.defaultConfig.versionName)
+        println(version)
     }
 }
 
 android {
     namespace = "com.msp1974.vacompanion"
     compileSdk = 36
-
-    val versionPropsFile = file("../version.properties")
-    var version = "0.0.0"
-    var code = 0
-
-    if (versionPropsFile.canRead()) {
-        val versionProps = Properties()
-        versionProps.load(FileInputStream(versionPropsFile))
-
-        version = versionProps["VERSION"].toString()
-        code = versionProps["VERSION_CODE"].toString().toInt() + 1
-        versionProps["VERSION_CODE"] = code.toString()
-        versionProps.store(versionPropsFile.writer(), null)
-
-
-    } else {
-        throw GradleException("Could not read version.properties!")
-    }
 
     defaultConfig {
         applicationId = "com.msp1974.vacompanion"
@@ -48,8 +47,6 @@ android {
         versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-
-
 
     signingConfigs {
         create("release") {
@@ -75,7 +72,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             ndk {
                 abiFilters.add("arm64-v8a")
                 abiFilters.add("armeabi-v7a")
