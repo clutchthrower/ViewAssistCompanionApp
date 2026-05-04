@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -19,13 +22,42 @@ android {
     namespace = "com.msp1974.vacompanion"
     compileSdk = 36
 
+    val versionPropsFile = file("../version.properties")
+    var version = "0.0.0"
+    var code = 0
+
+    if (versionPropsFile.canRead()) {
+        val versionProps = Properties()
+        versionProps.load(FileInputStream(versionPropsFile))
+
+        version = versionProps["VERSION"].toString()
+        code = versionProps["VERSION_CODE"].toString().toInt() + 1
+        versionProps["VERSION_CODE"] = code.toString()
+        versionProps.store(versionPropsFile.writer(), null)
+
+
+    } else {
+        throw GradleException("Could not read version.properties!")
+    }
+
     defaultConfig {
         applicationId = "com.msp1974.vacompanion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.11.0-rc1"
+        versionName = version
+        versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
     }
 
     buildTypes {
