@@ -65,7 +65,7 @@ class CustomWebView @JvmOverloads constructor(
             textZoom = 100
             useWideViewPort = true
             loadWithOverviewMode = true
-            setSupportZoom(false)
+            setSupportZoom(true)
             builtInZoomControls = false
             displayZoomControls = false
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -130,9 +130,17 @@ class CustomWebView @JvmOverloads constructor(
     fun setZoomLevel(level: Int) {
         if (level == 0) {
             settings.useWideViewPort = true
-            settings.textZoom = 100
         } else {
             settings.useWideViewPort = false
+            setInitialScale(level)
+        }
+
+    }
+
+    fun setTextSize(level: Int) {
+        if (level == 0) {
+            settings.textZoom = 100
+        } else {
             settings.textZoom = level
         }
 

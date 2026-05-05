@@ -173,6 +173,10 @@ class APPConfig @Inject constructor(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
+    var textSize: Int by Delegates.observable(0) { property, oldValue, newValue ->
+        onValueChangedListener(property, oldValue, newValue)
+    }
+
     var screenOnWakeWord: Boolean by Delegates.observable(false) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
@@ -306,6 +310,7 @@ class APPConfig @Inject constructor(val context: Context) {
         settings["integration_version"]?.jsonPrimitive?.contentOrNull?.let { integrationVersion = it }
         settings["min_required_apk_version"]?.jsonPrimitive?.contentOrNull?.let { minRequiredApkVersion = it }
         settings["zoom_level"]?.jsonPrimitive?.intOrNull?.let { zoomLevel = it }
+        settings["text_size"]?.jsonPrimitive?.intOrNull?.let { textSize = it }
         settings["screen_on_wake_word"]?.jsonPrimitive?.booleanOrNull?.let { screenOnWakeWord = it }
         settings["screen_on_bump"]?.jsonPrimitive?.booleanOrNull?.let { screenOnBump = it }
         settings["screen_on_proximity"]?.jsonPrimitive?.booleanOrNull?.let { screenOnProximity = it }
