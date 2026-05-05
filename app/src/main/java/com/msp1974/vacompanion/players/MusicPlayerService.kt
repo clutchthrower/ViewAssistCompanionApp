@@ -145,8 +145,8 @@ class MusicPlayerService() : Service() {
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS -> {
-                        hasAudioFocus = false
-                        pause()
+                        //hasAudioFocus = false
+                        //pause()
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
