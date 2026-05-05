@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -18,13 +19,11 @@ import androidx.lifecycle.lifecycleScope
 import com.msp1974.vacompanion.MainActivity
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.VACAApplication
+import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.BackgroundTaskStatus
 import com.msp1974.vacompanion.utils.FirebaseManager
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Timer
@@ -87,7 +86,17 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
                         .setSmallIcon(R.mipmap.ic_launcher)
                         .setContentTitle("View Assist Companion App")
                         .setContentText("Service is running")
+                        .apply {
+                            if (isHomeApp()) {
+                                addAction(
+                                    R.drawable.outline_stop_circle_24, getString(R.string.close_app),
+                                    sendServiceIntent(Actions.STOP)
+                                )
+                            }
+                        }
                         .build()
+
+
 
                 lifecycleScope.launch {
                     firebase.addToCrashLog("Background service starting")
@@ -147,6 +156,7 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
 
             Actions.STOP.toString() -> {
                 Timber.d("Stopping foreground service")
+                BroadcastSender.sendBroadcast(this, BroadcastSender.CLOSE_APP)
                 stopSelf()
             }
         }
@@ -174,9 +184,9 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
         },0,5000)
     }
 
-    private fun stopServiceIntent(name: String): PendingIntent {
+    private fun sendServiceIntent(action: Actions): PendingIntent {
         val intent = Intent(this, VAForegroundService::class.java)
-        intent.setAction(name)
+        intent.setAction(action.toString())
         val pendingIntent = PendingIntent.getService(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return pendingIntent
     }
@@ -202,5 +212,16 @@ class VAForegroundService @Inject constructor() : LifecycleService() {
             ex.printStackTrace()
             firebase.logException(ex)
         }
+    }
+
+    fun isHomeApp(): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN)
+        intent.addCategory(Intent.CATEGORY_HOME)
+        val res: ResolveInfo? = packageManager.resolveActivity(intent, 0)
+        if (res?.activityInfo != null && packageName.equals(res.activityInfo.packageName)
+        ) {
+            return true
+        }
+        return false
     }
 }

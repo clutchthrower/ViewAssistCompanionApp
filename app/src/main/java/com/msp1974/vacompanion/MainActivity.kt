@@ -325,6 +325,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)
             addAction(BroadcastSender.TOAST_MESSAGE)
+            addAction(BroadcastSender.CLOSE_APP)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(satelliteBroadcastReceiver, filter)
@@ -376,6 +377,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
                     log.d("Loading URL: $url")
                     webView.loadUrl(url)
+                }
+                BroadcastSender.CLOSE_APP -> {
+                    terminateApp()
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     if (initialised) {
@@ -479,6 +483,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(satelliteBroadcastReceiver)
         unregisterReceiver(satelliteBroadcastReceiver)
         super.onDestroy()
+    }
+
+    private fun terminateApp() {
+        finishAffinity()
     }
 
     private suspend fun runBackgroundTasks() {

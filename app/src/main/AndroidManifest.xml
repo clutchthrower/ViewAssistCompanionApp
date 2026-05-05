@@ -67,7 +67,7 @@
         tools:targetApi="33">
         <activity
             android:name=".MainActivity"
-            android:launchMode="singleTask"
+            android:launchMode="singleInstance"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
