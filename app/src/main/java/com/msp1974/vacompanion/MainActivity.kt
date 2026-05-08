@@ -479,11 +479,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     override fun onDestroy() {
         log.d("Main Activity destroyed")
 
-        Intent(this.applicationContext, VAForegroundService::class.java).also {
-            it.action = VAForegroundService.Actions.STOP.toString()
-            startService(it)
-        }
-
         screen.setScreenTimeout(config.screenTimeout)
         config.eventBroadcaster.removeListener(this)
         LocalBroadcastManager.getInstance(this).unregisterReceiver(satelliteBroadcastReceiver)
