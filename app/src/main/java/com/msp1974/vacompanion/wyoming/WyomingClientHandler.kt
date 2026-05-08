@@ -75,7 +75,7 @@ abstract class WyomingClientHandler (
     suspend fun start() {
         try {
             writeHandlerJob = scope.launch {
-                while(true) {
+                while(runClient) {
                     select {
                         writeBuffer.onReceive { packet ->
                             writeMessageInternal(packet)

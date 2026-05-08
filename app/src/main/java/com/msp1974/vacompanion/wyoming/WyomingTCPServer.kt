@@ -25,6 +25,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import timber.log.Timber
+import java.nio.channels.ClosedChannelException
 import java.util.concurrent.Executors
 
 interface IEvents {
@@ -50,7 +51,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
     private var runServer: Boolean = true
     var satellite: Satellite? = null
     private val clients = mutableMapOf<String, Connection>()
-    private lateinit var zeroconf: Zeroconf
+    private val zeroconf = Zeroconf(context, config.uuid)
     private var serverSocket: ServerSocket? = null
     private var restartIfStopped: Boolean = false
 
@@ -83,7 +84,6 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
         Timber.d("Starting zeroconf")
         try {
-            zeroconf = Zeroconf(context, config.uuid)
             registerNSD()
         } catch (e: Exception) {
             Timber.e("Error starting zeroconf: $e")
@@ -96,10 +96,39 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                 state = ServerState.RUNNING
                 restartIfStopped = true
                 while (runServer) {
-                    val socket = serverSocket?.accept()
+                    val socket = try {
+                        serverSocket?.accept()
+                    } catch (e: Throwable) {
+                        if (!runServer && e is ClosedChannelException) {
+                            Timber.d("Server socket closed while stopping; exiting accept loop")
+                            break
+                        }
+                        if (e is ClosedChannelException) {
+                            Timber.w("Accept loop saw closed channel while running; continuing")
+                            continue
+                        }
+                        throw e
+                    }
+
+                    if (socket == null) {
+                        if (runServer) {
+                            Timber.w("Accept returned null socket while runServer=true")
+                            continue
+                        }
+                        break
+                    }
+
+                    val remoteAddress = runCatching { socket.remoteAddress.toString() }
+                        .getOrElse {
+                            "unknown-remote(${it::class.simpleName})"
+                        }
+                    val id = runCatching { socket.remoteAddress.port().toString() }
+                        .getOrElse {
+                            "unknown-${System.nanoTime()}"
+                        }
 
                     val data = buildJsonObject {
-                        put("remoteId", socket?.remoteAddress.toString())
+                        put("remoteId", remoteAddress)
                     }
 
                     val client: WyomingClientHandler = object : WyomingClientHandler(scope, socket!!) {
@@ -143,7 +172,6 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                         }
                     }
 
-                    val id = socket.remoteAddress.port().toString()
                     clients[id] = Connection(id, client)
                     Timber.d("Client connected: ${socket.remoteAddress}.  Total: ${clients.size}")
                     onEvent("client_connected", data)
@@ -165,10 +193,11 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                             clients.clear()
                         }
                         serverSocket?.close()
-                        unregisterNSD()
+
                     } catch (e: Exception) {
                         Timber.e("Error when stopping server: $e")
                     }
+                    unregisterNSD()
                     state = ServerState.STOPPED
                     Timber.i("Wyoming TCP Server stopped")
                 }
@@ -260,7 +289,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         if (satellite != null) {
             if (satellite?.state == SatelliteState.RUNNING) {
                 Timber.d("Satellite already running - updating clientId")
-                satellite?.clientId = clientId
+                satellite?.setNewClientId(clientId)
                 return
             } else if (satellite?.state == SatelliteState.STOPPING) {
                 try {
