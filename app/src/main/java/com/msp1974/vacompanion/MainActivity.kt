@@ -70,6 +70,7 @@ import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.device.ScreenUtils
+import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Updater
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
@@ -359,6 +360,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
                     log.d("Loading URL: $url")
                     webView.loadUrl(url)
+                }
+                BroadcastSender.SATELLITE_CLIENT_UPDATED -> {
+                    if (viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.ERROR) {
+                        webView.reload()
+                    }
                 }
                 BroadcastSender.SATELLITE_STOPPED -> {
                     viewModel.setSatelliteRunning(false)

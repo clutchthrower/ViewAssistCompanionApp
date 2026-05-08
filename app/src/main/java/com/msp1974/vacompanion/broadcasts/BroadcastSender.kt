@@ -12,6 +12,7 @@ class BroadcastSender {
         internal const val WAKE_WORD_DETECTED = "WAKE_WORD_DETECTED"
         internal const val STOP_WORD_DETECTED = "STOP_WORD_DETECTED"
         internal const val SATELLITE_STARTED = "SATELLITE_STARTED"
+        internal const val SATELLITE_CLIENT_UPDATED = "SATELLITE_CLIENT_UPDATED"
         internal const val SATELLITE_STOPPED = "SATELLITE_STOPPED"
         internal const val TOAST_MESSAGE = "TOAST_MESSAGE"
         internal const val WEBVIEW_CRASH = "WEBVIEW_CRASH"

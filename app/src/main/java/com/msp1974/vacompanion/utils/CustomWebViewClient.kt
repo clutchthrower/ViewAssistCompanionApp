@@ -33,6 +33,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
 
         private const val APP_PREFIX = "app://"
         private const val INTENT_PREFIX = "intent:"
+        private const val ERROR_URL = "file:///android_asset/web/error.html"
     }
 
     override fun onRenderProcessGone(
@@ -122,13 +123,15 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-        Timber.d("Page started: $url")
-        setPageLoadingState(PageLoadingStage.STARTED)
+        Timber.d("Loading url: $url")
+        if (url != ERROR_URL) {
+            setPageLoadingState(PageLoadingStage.STARTED)
+        }
         super.onPageStarted(view, url, favicon)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
-        if (viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.AUTHORISED) {
+        if (url != ERROR_URL && viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.AUTHORISED) {
             Handler(Looper.getMainLooper()).postDelayed({
                 setPageLoadingState(PageLoadingStage.LOADED)
             }, 1000)
@@ -150,7 +153,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     ) {
         Timber.e("Received error: $errorCode: $description")
         setPageLoadingState(PageLoadingStage.ERROR)
-        view.loadUrl("file:///android_asset/web/error.html")
+        view.loadUrl(ERROR_URL)
     }
 
     @SuppressLint("WebViewClientOnReceivedSslError")

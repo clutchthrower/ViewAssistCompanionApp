@@ -157,6 +157,11 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     }
 
+    fun setNewClientId(clientId: String) {
+        this.clientId = clientId
+        BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_CLIENT_UPDATED)
+    }
+
     suspend fun stop() {
         state = SatelliteState.STOPPING
 
