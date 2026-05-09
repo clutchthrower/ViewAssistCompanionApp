@@ -152,7 +152,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         keepSplashScreen = false
 
         // Wake screen on boot if off - keep black.
-        if (!screen.isScreenOn()) {
+        if (!screen.isScreenOn()  && screen.isScreenOff()) {
             Timber.i("Performing screen off startup....")
             screenOffStartUp = true
         } else {
@@ -217,6 +217,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
             // Turn on screen for startup to show permission request
             screenOffStartUp = false
+
             setScreenSettings()
             checkAndRequestPermissions()
         } else {
@@ -307,14 +308,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
         Timber.d("Network active")
 
-        var waitLoops = 0
         while (!screen.isScreenOn()) {
             Timber.d("Waiting for screen on...")
-            delay(500)
-            waitLoops++
-            if (waitLoops > 10) {
-                screenWake()
-            }
+            delay(1000)
         }
         Timber.d("Screen on")
 
@@ -392,10 +388,14 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     terminateApp()
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    if (!config.screenOn) config.screenOn = true
+                    if (initialised) {
+                        // If woken by hardware buttons set screen config
+                        setScreenSettings()
+                    }
+                    config.screenOn = true
                 }
                 Intent.ACTION_SCREEN_OFF -> {
-                    if (config.screenOn) config.screenOn = false
+                    config.screenOn = false
                 }
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
@@ -505,7 +505,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             }
             return
         }
-
         config.backgroundTaskStatus = BackgroundTaskStatus.STARTING
 
         if (!updateProcessComplete) {
@@ -575,7 +574,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "textSize" -> webView.setTextSize(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
                 "refresh" -> webView.refresh()
-                "screenWake" -> config.screenOn = true
+                "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
                 "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
@@ -698,7 +697,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         try {
             delay(1000)
             withTimeout(15000) {
-                while (screen.isScreenOn()) {
+                while (!screen.isScreenOff()) {
                     delay(500)
                 }
             }
@@ -919,7 +918,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     private fun checkAndRequestDeviceAdminPermission() {
         val device = DeviceCapabilitiesManager(this, config)
         if (!device.isAndroidThings() && !permissions.isDeviceAdmin()) {
-            Timber.d("Requesting device admin permission")
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(this, VACADeviceAdminReceiver::class.java))
             intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "This application requires Device Admin rights to be able to control the screen.")
