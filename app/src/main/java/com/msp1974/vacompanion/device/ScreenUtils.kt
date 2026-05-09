@@ -154,8 +154,12 @@ class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper
     }
 
     fun isScreenOn(): Boolean {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        return pm.isInteractive
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return display.state == Display.STATE_ON
+        } else {
+            val wm = context.getSystemService(WINDOW_SERVICE) as WindowManager
+            return wm.defaultDisplay.state == Display.STATE_ON
+        }
     }
 
     fun isScreenOff(): Boolean {
