@@ -152,7 +152,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         keepSplashScreen = false
 
         // Wake screen on boot if off - keep black.
-        if (!screen.isScreenOn()  && screen.isScreenOff()) {
+        if (!screen.isScreenOn() && screen.isScreenOff()) {
             Timber.i("Performing screen off startup....")
             screenOffStartUp = true
         } else {
@@ -307,9 +307,14 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
         Timber.d("Network active")
 
+        var waitLoops = 0
         while (!screen.isScreenOn()) {
             Timber.d("Waiting for screen on...")
-            delay(1000)
+            delay(500)
+            waitLoops++
+            if (waitLoops > 10) {
+                screenWake()
+            }
         }
         Timber.d("Screen on")
 

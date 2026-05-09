@@ -116,11 +116,11 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
         val startTime = System.currentTimeMillis()
         scope.launch {
-            startSensors()
             warmUpAudioResources()
+            startSensors()
             startWakeWordDetection()
             eventHandler.run()
-        }.join()
+        }
 
         sendDeviceStates()
 
@@ -293,7 +293,10 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
             // if wake up on ww, send event
             if (config.screenOnWakeWord) {
-                config.eventBroadcaster.notifyEvent(Event("screenWake", "", ""))
+                config.eventBroadcaster.notifyEvent(Event("screenOn",
+                    oldValue = false,
+                    newValue = true
+                ))
             }
             startAudioPipeline(PipelineStartMode.WAKE_WORD_DETECTED)
             playWakeWordDetectionSound()
@@ -538,8 +541,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     // ****
     // *************************************************************************
     @SuppressLint("DiscouragedApi")
-    private fun warmUpAudioResources() {
-        scope.launch(Dispatchers.Default) {
+    private suspend fun warmUpAudioResources() {
+        withContext(Dispatchers.Main) {
             mediaManager.soundPlayer.preload(R.raw.error)
             if (config.wakeWordSound != "none") {
                 val resId = context.resources.getIdentifier(
