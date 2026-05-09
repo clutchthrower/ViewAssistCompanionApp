@@ -217,7 +217,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
             // Turn on screen for startup to show permission request
             screenOffStartUp = false
-
             setScreenSettings()
             checkAndRequestPermissions()
         } else {
@@ -388,14 +387,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     terminateApp()
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    if (initialised) {
-                        // If woken by hardware buttons set screen config
-                        setScreenSettings()
-                    }
-                    config.screenOn = true
+                    if (!config.screenOn) config.screenOn = true
                 }
                 Intent.ACTION_SCREEN_OFF -> {
-                    config.screenOn = false
+                    if (config.screenOn) config.screenOn = false
                 }
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
@@ -505,6 +500,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             }
             return
         }
+
         config.backgroundTaskStatus = BackgroundTaskStatus.STARTING
 
         if (!updateProcessComplete) {
@@ -574,7 +570,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "textSize" -> webView.setTextSize(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
                 "refresh" -> webView.refresh()
-                "screenWake" -> screenWake()
+                "screenWake" -> config.screenOn = true
                 "screenSleep" -> screenSleep()
                 "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
@@ -637,10 +633,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun screenWake() {
-        if (screen.isScreenOn()) {
-            Timber.w("Not waking screen - already on")
-            return
-        }
         Timber.d("Wake screen")
         // Cancel any screen sleep timer
         if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
