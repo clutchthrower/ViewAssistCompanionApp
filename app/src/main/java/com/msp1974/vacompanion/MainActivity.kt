@@ -637,6 +637,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun screenWake() {
+        if (screen.isScreenOn()) {
+            Timber.w("Not waking screen - already on")
+            return
+        }
         Timber.d("Wake screen")
         // Cancel any screen sleep timer
         if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
@@ -697,7 +701,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         try {
             delay(1000)
             withTimeout(15000) {
-                while (!screen.isScreenOff()) {
+                while (screen.isScreenOn()) {
                     delay(500)
                 }
             }

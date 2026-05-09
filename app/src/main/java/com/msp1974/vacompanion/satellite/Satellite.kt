@@ -148,13 +148,14 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
     fun sendDeviceStates() {
-        config.doNotDisturb = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
-
-        val screenState = ScreenUtils(context, config).isScreenOn()
-        if (config.screenOn != screenState) {
-            config.screenOn = ScreenUtils(context, config).isScreenOn()
-        }
-
+        // TODO: Do not put screen state in here as conflicts with update in MainActivity on satellite start
+        sendStatus(
+            buildJsonObject {
+                putJsonObject("sensors", {
+                    put("do_not_disturb", DeviceCapabilitiesManager.isDoNotDisturbEnabled(context))
+                })
+            }
+        )
     }
 
     fun setNewClientId(clientId: String) {
