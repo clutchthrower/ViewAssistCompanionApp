@@ -15,6 +15,14 @@ class AudioDSP {
     fun audioLevel(audioBuffer: FloatArray): Float {
         return audioBuffer.map { i -> abs(i) }.average().toFloat()
     }
+    
+    fun reduceVolume(audioBuffer: ByteArray, reductionFactor: Float): ByteArray {
+        val shortArray = byteArrayToShortArray(audioBuffer)
+        for (i in shortArray.indices) {
+            shortArray[i] = (shortArray[i] * reductionFactor).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        return shortArrayToByteBuffer(shortArray)
+    }
 
     fun normaliseAudioBuffer(audioBuffer: ShortArray): FloatArray {
         val floatBuffer = audioBuffer.map { (it.toFloat() / 32768.0f) }.toFloatArray()
@@ -38,6 +46,20 @@ class AudioDSP {
             .asShortBuffer()
             .get(shortArray)
         return shortArray
+    }
+
+    fun byteArrayToFloatArray(byteArray: ByteArray): FloatArray {
+        val shortArray = ShortArray(byteArray.size / 2)
+        ByteBuffer.wrap(byteArray)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer()
+            .get(shortArray)
+
+        val floatArray = FloatArray(shortArray.size)
+        for (i in shortArray.indices) {
+            floatArray[i] = shortArray[i].toFloat() / 32768.0f
+        }
+        return floatArray
     }
 
     fun floatArrayToByteBuffer(audioBuffer: FloatArray): ByteArray {

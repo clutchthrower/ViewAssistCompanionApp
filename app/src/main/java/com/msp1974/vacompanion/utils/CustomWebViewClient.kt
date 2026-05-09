@@ -13,6 +13,7 @@ import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebView
 import android.app.AlertDialog
+import android.app.Application
 import androidx.webkit.WebViewClientCompat
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
@@ -24,14 +25,15 @@ import androidx.core.net.toUri
 
 class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     val log = Logger()
-    private val firebase = FirebaseManager.getInstance()
-    val config = viewModel.config!!
-    private val resources = viewModel.resources!!
+    val config = viewModel.config
+    private val firebase = FirebaseManager.getInstance(config.context)
+    private val resources = viewModel.resources
 
     companion object {
 
         private const val APP_PREFIX = "app://"
         private const val INTENT_PREFIX = "intent:"
+        private const val ERROR_URL = "file:///android_asset/web/error.html"
     }
 
     override fun onRenderProcessGone(
@@ -59,7 +61,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
         url.let {
             try {
                 val pm: PackageManager = config.context.packageManager
-                val activityContext = config.context.takeIf { it is Activity } ?: return false
+                val activityContext = config.context.takeIf { it is Application || it is Activity } ?: return false
 
                 // If the url is our client id then capture the auth code and get an access token
                 if (it.contains(AuthUtils.CLIENT_URL)) {
@@ -105,7 +107,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                         activityContext.startActivity(intent)
                     }
                     return true
-                } else if (!it.toString().contains(it)) {
+                } else if (!it.contains(it)) {
                     Timber.d("Launching browser")
                     val browserIntent = Intent(Intent.ACTION_VIEW, it.toUri())
                     activityContext.startActivity(browserIntent)
@@ -121,13 +123,15 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-        Timber.d("Page started: $url")
-        setPageLoadingState(PageLoadingStage.STARTED)
+        Timber.d("Loading url: $url")
+        if (url != ERROR_URL) {
+            setPageLoadingState(PageLoadingStage.STARTED)
+        }
         super.onPageStarted(view, url, favicon)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
-        if (viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.AUTHORISED) {
+        if (url != ERROR_URL && viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.AUTHORISED) {
             Handler(Looper.getMainLooper()).postDelayed({
                 setPageLoadingState(PageLoadingStage.LOADED)
             }, 1000)
@@ -147,7 +151,9 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
         description: String,
         failingUrl: String
     ) {
-        view.loadUrl("file:///android_asset/web/error.html")
+        Timber.e("Received error: $errorCode: $description")
+        setPageLoadingState(PageLoadingStage.ERROR)
+        view.loadUrl(ERROR_URL)
     }
 
     @SuppressLint("WebViewClientOnReceivedSslError")
@@ -185,6 +191,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                 }
                 setNegativeButton(resources.getString(R.string.dialog_button_no)) { _: DialogInterface?, _: Int ->
                     super.onReceivedSslError(view, handler, error)
+                    setPageLoadingState(PageLoadingStage.ERROR)
                     view.loadUrl("file:///android_asset/web/error.html")
                 }
             }.create().show()
@@ -200,6 +207,5 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     ) {
         config.currentPath = URL(url).path
     }
-
 
 }

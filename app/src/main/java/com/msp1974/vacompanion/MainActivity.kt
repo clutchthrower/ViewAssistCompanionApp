@@ -26,6 +26,7 @@ import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -61,16 +62,17 @@ import com.msp1974.vacompanion.ui.theme.AppTheme
 import com.msp1974.vacompanion.utils.AuthUtils
 import com.msp1974.vacompanion.utils.CustomWebView
 import com.msp1974.vacompanion.utils.CustomWebViewClient
-import com.msp1974.vacompanion.utils.DeviceCapabilitiesManager
+import com.msp1974.vacompanion.device.DeviceCapabilitiesManager
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Helpers
-import com.msp1974.vacompanion.utils.Helpers.Companion.isAndroidThings
 import com.msp1974.vacompanion.utils.Logger
 import com.msp1974.vacompanion.utils.Permissions
-import com.msp1974.vacompanion.utils.ScreenUtils
+import com.msp1974.vacompanion.device.ScreenUtils
+import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Updater
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -78,16 +80,19 @@ import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import javax.inject.Inject
 import kotlin.getValue
 
-
+@AndroidEntryPoint
 class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
+
+    @Inject lateinit var config: APPConfig
+
     val viewModel: VAViewModel by viewModels()
 
     private val log = Logger()
-    private val firebase = FirebaseManager.getInstance()
+    private var firebaseManager: FirebaseManager? = null
 
-    private lateinit var config: APPConfig
     private lateinit var webView: CustomWebView
     private lateinit var webViewClient: CustomWebViewClient
 
@@ -108,17 +113,21 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     @SuppressLint("HardwareIds", "SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
 
-        config = APPConfig.getInstance(this)
-        screen = ScreenUtils(this)
-        updater = Updater(this)
-        permissions = Permissions(this)
-
-        viewModel.bind(APPConfig.getInstance(this),resources)
-
         val splashscreen = installSplashScreen()
+        super.onCreate(savedInstanceState)
+
+        screen = ScreenUtils(this, config)
+        updater = Updater(this)
+        permissions = Permissions(this, config)
+
         var keepSplashScreen = true
 
-        super.onCreate(savedInstanceState)
+        firebaseManager = try {
+            FirebaseManager.getInstance(this)
+        } catch (e: Exception) {
+            log.w("Firebase unavailable: ${e.message}")
+            null
+        }
         enableEdgeToEdge()
 
         splashscreen.setKeepOnScreenCondition { keepSplashScreen }
@@ -130,6 +139,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         log.i("Starting View Assist Companion App")
         log.i("Version ${config.version}")
         log.i("Android version: ${Helpers.getAndroidVersion()}")
+        log.i("CPU: ${System.getProperty("os.arch")}")
         log.i("Name: ${Helpers.getDeviceName()}")
         log.i("Serial: ${Build.SERIAL}")
         log.i("UUID: ${config.uuid}")
@@ -137,7 +147,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         val policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
         StrictMode.setThreadPolicy(policy)
-        Thread.setDefaultUncaughtExceptionHandler(AppExceptionHandler(this))
 
         setStatus(getString(R.string.status_initialising))
         keepSplashScreen = false
@@ -158,7 +167,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         setContent {
             val vaUiState by viewModel.vacaState.collectAsState()
-            AppTheme(darkMode = config.darkMode, dynamicColor = false) {
+            AppTheme(darkMode = false, dynamicColor = false) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize(),
@@ -263,11 +272,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun setFirebaseUserProperties() {
-        val webViewVersion = DeviceCapabilitiesManager(this).getWebViewVersion()
-        firebase.setUserProperty("webview_version", webViewVersion)
-        firebase.setUserProperty("device_signature", Helpers.getDeviceName().toString())
+        val webViewVersion = DeviceCapabilitiesManager(this, config).getWebViewVersion()
+        firebaseManager?.setUserProperty("webview_version", webViewVersion)
+        firebaseManager?.setUserProperty("device_signature", Helpers.getDeviceName().toString())
 
-        firebase.setCustomKeys(mapOf(
+        firebaseManager?.setCustomKeys(mapOf(
             "Webview" to webViewVersion,
             "Device" to Helpers.getDeviceName().toString(),
             "UUID" to config.uuid
@@ -316,6 +325,8 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             addAction(BroadcastSender.SATELLITE_STOPPED)
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)
+            addAction(BroadcastSender.TOAST_MESSAGE)
+            addAction(BroadcastSender.CLOSE_APP)
         }
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(satelliteBroadcastReceiver, filter)
@@ -331,7 +342,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         config.eventBroadcaster.addListener(this)
         config.currentActivity = "Main"
 
-        registerWifiMonitor()
+        //registerWifiMonitor()
 
         // Start background tasks
         runBackgroundTasks()
@@ -349,6 +360,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
                     log.d("Loading URL: $url")
                     webView.loadUrl(url)
+                }
+                BroadcastSender.SATELLITE_CLIENT_UPDATED -> {
+                    if (viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.ERROR) {
+                        webView.reload()
+                    }
                 }
                 BroadcastSender.SATELLITE_STOPPED -> {
                     viewModel.setSatelliteRunning(false)
@@ -368,6 +384,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     log.d("Loading URL: $url")
                     webView.loadUrl(url)
                 }
+                BroadcastSender.CLOSE_APP -> {
+                    terminateApp()
+                }
                 Intent.ACTION_SCREEN_ON -> {
                     if (initialised) {
                         // If woken by hardware buttons set screen config
@@ -384,10 +403,15 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         config.doNotDisturb = dndEnabled
                     }
                 }
+                BroadcastSender.TOAST_MESSAGE -> {
+                    val msg = intent.getStringExtra("extra") ?: ""
+                    if (msg.isNotEmpty()) {
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
-
 
     fun registerWifiMonitor() {
         val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -408,14 +432,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     if (!hasNetwork) {
                         viewModel.onNetworkStateChange()
                         setStatus(getString(R.string.status_waiting_for_network))
-                        if (config.enableNetworkRecovery) {
-                            val delaySecs = 10
-                            log.d("Disabling wifi for ${delaySecs}s")
-                            Helpers.enableWifi(this@MainActivity, false)
-                            delay(delaySecs.toLong() * 1000)
-                            log.d("Enabling wifi")
-                            Helpers.enableWifi(this@MainActivity, true)
-                        }
                     }
                 }
             }
@@ -462,6 +478,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
     override fun onDestroy() {
         log.d("Main Activity destroyed")
+
         screen.setScreenTimeout(config.screenTimeout)
         config.eventBroadcaster.removeListener(this)
         LocalBroadcastManager.getInstance(this).unregisterReceiver(satelliteBroadcastReceiver)
@@ -469,10 +486,14 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         super.onDestroy()
     }
 
+    private fun terminateApp() {
+        finishAffinity()
+    }
+
     private suspend fun runBackgroundTasks() {
         if ( config.backgroundTaskStatus != BackgroundTaskStatus.NOT_STARTED ) {
             log.w("Background task already running.  Not starting from MainActivity")
-            firebase.logEvent(FirebaseManager.MAIN_ACTIVITY_BACKGROUND_TASK_ALREADY_RUNNING, mapOf())
+            firebaseManager?.logEvent(FirebaseManager.MAIN_ACTIVITY_BACKGROUND_TASK_ALREADY_RUNNING, mapOf())
             if (config.isRunning) {
                 viewModel.setSatelliteRunning(true)
                 webView.setZoomLevel(config.zoomLevel)
@@ -550,10 +571,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
             when (event.eventName) {
                 "zoomLevel" -> webView.setZoomLevel(event.newValue as Int)
+                "textSize" -> webView.setTextSize(event.newValue as Int)
                 "darkMode" -> setDarkMode(event.newValue as Boolean)
-                "refresh" -> webView.reload()
+                "refresh" -> webView.refresh()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
+                "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
                 "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()
@@ -563,6 +586,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     this,
                     event.newValue as String,
                     Toast.LENGTH_SHORT
+                ).show()
+                "showToastError" -> Toast.makeText(
+                    this,
+                    "⚠️ ${event.newValue}",
+                    Toast.LENGTH_LONG
                 ).show()
                 else -> consumed = false
             }
@@ -624,17 +652,21 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
         screen.wakeScreen()
 
-        if (viewModel.vacaState.value.screenBlank && initialised) {
+        screenOffInProgress = false
+        if (initialised) {
             setScreenSaver(false)
         }
     }
 
     fun screenSleep() {
+        if (screen.isScreenOff()) {
+            Timber.d("Screen already off, ignoring sleep request")
+            return
+        }
         Timber.d("Sleeping screen")
         if (permissions.isDeviceAdmin()) {
             screen.setPartialWakeLock()
             lockScreen()
-            setScreenSaver(false)
             return
         }
 
@@ -676,7 +708,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
         config.screenOn = false
         screenOffInProgress = false
-        setScreenSaver(false)
         log.d("Screen off")
     }
 
@@ -721,7 +752,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             config.hasRecordAudioPermission = true
         }
 
-        if (DeviceCapabilitiesManager(this).hasFrontCamera()) {
+        if (DeviceCapabilitiesManager(this, config).hasFrontCamera()) {
             if (ContextCompat.checkSelfPermission(this, permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 requiredPermissions += permission.CAMERA
                 requestID += CAMERA_PERMISSIONS_REQUEST
@@ -819,7 +850,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     private fun checkAndRequestWriteSettingsPermission() {
-        if (config.canSetScreenWritePermission && !ScreenUtils(this).canWriteScreenSetting()) {
+        if (config.canSetScreenWritePermission && !Settings.System.canWrite(applicationContext)) {
             val alertDialog = AlertDialog.Builder(this)
             log.d("Requesting write settings permission")
             alertDialog.apply {
@@ -885,7 +916,8 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     private fun checkAndRequestDeviceAdminPermission() {
-        if (!isAndroidThings(this) && !permissions.isDeviceAdmin()) {
+        val device = DeviceCapabilitiesManager(this, config)
+        if (!device.isAndroidThings() && !permissions.isDeviceAdmin()) {
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(this, VACADeviceAdminReceiver::class.java))
             intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "This application requires Device Admin rights to be able to control the screen.")
@@ -975,7 +1007,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         // Try and prevent the app being killed by memory manager
         if (level >= TRIM_MEMORY_UI_HIDDEN) {
             // Release memory related to UI elements, such as bitmap caches.
-            firebase.logEvent(FirebaseManager.TRIM_MEMORY_UI_HIDDEN, mapOf())
+            firebaseManager?.logEvent(FirebaseManager.TRIM_MEMORY_UI_HIDDEN, mapOf())
             Runtime.getRuntime().gc()
 
         }
@@ -983,11 +1015,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         if (level >= TRIM_MEMORY_BACKGROUND) {
             // Release memory related to background processing, such as by
             // closing a database connection.
-            firebase.logEvent(FirebaseManager.TRIM_MEMORY_BACKGROUND, mapOf())
+            firebaseManager?.logEvent(FirebaseManager.TRIM_MEMORY_BACKGROUND, mapOf())
             Runtime.getRuntime().gc()
         }
 
         super.onTrimMemory(level)
     }
 }
-

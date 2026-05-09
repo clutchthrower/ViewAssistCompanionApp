@@ -1,4 +1,4 @@
-package com.msp1974.vacompanion.utils
+package com.msp1974.vacompanion.device
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -12,14 +12,15 @@ import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.google.firebase.Firebase
-import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.FirebaseManager
+import com.msp1974.vacompanion.utils.Logger
+import javax.inject.Inject
 
-
-class ScreenUtils(val context: Context) : ContextWrapper(context) {
+class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper(context) {
     var log = Logger()
-    var config = APPConfig.getInstance(context)
+    private val firebase = FirebaseManager.Companion.getInstance(context)
+
     private var wakeLock: PowerManager.WakeLock? = null
     var initBrightness: Float = 0f
 
@@ -51,7 +52,7 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
             }
         } catch (e: Exception) {
             log.e("Error setting screen brightness: $e")
-            Firebase.crashlytics.recordException(e)
+            firebase.logException(e)
         }
     }
 
@@ -119,7 +120,7 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
             }
         } catch (e: SecurityException) {
             log.e("Error setting screen brightness mode: $e")
-            Firebase.crashlytics.recordException(e)
+            firebase.logException(e)
         }
     }
 
@@ -153,8 +154,12 @@ class ScreenUtils(val context: Context) : ContextWrapper(context) {
     }
 
     fun isScreenOn(): Boolean {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        return pm.isInteractive
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return display.state == Display.STATE_ON
+        } else {
+            val wm = context.getSystemService(WINDOW_SERVICE) as WindowManager
+            return wm.defaultDisplay.state == Display.STATE_ON
+        }
     }
 
     fun isScreenOff(): Boolean {

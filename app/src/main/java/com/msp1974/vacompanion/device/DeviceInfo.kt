@@ -1,23 +1,27 @@
-package com.msp1974.vacompanion.utils
+package com.msp1974.vacompanion.device
 
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Context.NOTIFICATION_SERVICE
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.BatteryManager
 import android.os.Build
 import android.webkit.WebView
-import androidx.core.content.ContextCompat.getSystemService
-import com.google.firebase.Firebase
-import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.FirebaseManager
+import com.msp1974.vacompanion.utils.Helpers
+import com.msp1974.vacompanion.utils.Logger
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -25,6 +29,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import timber.log.Timber
+import javax.inject.Inject
 
 
 data class DeviceCapabilitiesData(
@@ -42,15 +47,14 @@ data class DeviceCapabilitiesData(
 )
 
 
-class DeviceCapabilitiesManager(val context: Context) {
+class DeviceCapabilitiesManager(val context: Context, val config: APPConfig) {
 
     val log = Logger()
-    val config = APPConfig.getInstance(context)
-
+    private val firebase = FirebaseManager.Companion.getInstance(context)
 
     fun getDeviceInfo(): DeviceCapabilitiesData {
         return DeviceCapabilitiesData(
-            deviceSignature = Helpers.getDeviceName().toString(),
+            deviceSignature = Helpers.Companion.getDeviceName().toString(),
             appVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName.toString(),
             sdkVersion = Build.VERSION.SDK_INT,
             webViewVersion = getWebViewVersion(),
@@ -75,8 +79,8 @@ class DeviceCapabilitiesManager(val context: Context) {
             return "none"
         }
 
-        val isPx30Evb = android.os.Build.DEVICE.equals("px30_evb", ignoreCase = true) ||
-                        android.os.Build.MODEL.equals("px30_evb", ignoreCase = true)
+        val isPx30Evb = Build.DEVICE.equals("px30_evb", ignoreCase = true) ||
+                        Build.MODEL.equals("px30_evb", ignoreCase = true)
 
         return if (isPx30Evb) "raw" else "standard"
     }
@@ -118,7 +122,7 @@ class DeviceCapabilitiesManager(val context: Context) {
         val batteryStatus = context.registerReceiver(null, intentFilter)
         val hasBattery = batteryStatus?.getBooleanExtra(BatteryManager.EXTRA_PRESENT, false)
         val batteryVoltage = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0)
-        return hasBattery == true && batteryVoltage != 0 && Helpers.getDeviceName().toString() != "Lenovo StarView"
+        return hasBattery == true && batteryVoltage != 0 && Helpers.Companion.getDeviceName().toString() != "Lenovo StarView"
     }
 
     fun hasLightSensor(): Boolean {
@@ -151,13 +155,25 @@ class DeviceCapabilitiesManager(val context: Context) {
         } catch (e: IllegalArgumentException) {
             // This is crucial. Catches issues like "Illegal argument to HAL module"
             // if the cameraId or characteristics query is somehow malformed on a specific device.
-            Firebase.crashlytics.recordException(e)
+            firebase.logException(e)
             return false
         } catch (e: Exception) {
             // Catch other unexpected exceptions
             return false
         }
         return false
+    }
+
+    fun hasMicrophone(): Boolean {
+        return context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)
+    }
+
+    fun isAndroidThings(): Boolean {
+        return context.packageManager.hasSystemFeature("android.hardware.type.embedded")
+    }
+
+    fun getProperty(name: String): String? {
+        return System.getProperty(name)
     }
 
     fun hasDND(): Boolean {
@@ -174,6 +190,9 @@ class DeviceCapabilitiesManager(val context: Context) {
                 "maxNotificationVolume",
                 audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
             )
+            put("hasAGC", AutomaticGainControl.isAvailable())
+            put("hasNS", NoiseSuppressor.isAvailable())
+            put("hasAEC", AcousticEchoCanceler.isAvailable())
         }
     }
 
@@ -182,23 +201,24 @@ class DeviceCapabilitiesManager(val context: Context) {
         @OptIn(ExperimentalSerializationApi::class)
         fun toJson(data: DeviceCapabilitiesData): JsonObject {
             return buildJsonObject {
-                putJsonObject("capabilities") {
-                    put("device_signature", data.deviceSignature)
-                    put("app_version", data.appVersion)
-                    put("sdk_version", data.sdkVersion)
-                    put("webview_version", data.webViewVersion)
-                    put("release", data.release)
-                    put("has_battery", data.hasBattery)
-                    put("has_front_camera", data.hasFrontCamera)
-                    put("has_dnd", data.hasDND)
-                    put("proximity_sensor_type", data.proximitySensorType)
-                    putJsonObject("audio") {
-                        put("max_music_volume", data.audioInfo.getValue("maxMusicVolume"))
-                        put("max_notification_volume", data.audioInfo.getValue("maxNotificationVolume"))
-                    }
-                    putJsonArray("sensors") {
-                        addAll(data.sensors)
-                    }
+                put("device_signature", data.deviceSignature)
+                put("app_version", data.appVersion)
+                put("sdk_version", data.sdkVersion)
+                put("webview_version", data.webViewVersion)
+                put("release", data.release)
+                put("has_battery", data.hasBattery)
+                put("has_front_camera", data.hasFrontCamera)
+                put("has_dnd", data.hasDND)
+                put("proximity_sensor_type", data.proximitySensorType)
+                putJsonObject("audio") {
+                    put("max_music_volume", data.audioInfo.getValue("maxMusicVolume"))
+                    put("max_notification_volume", data.audioInfo.getValue("maxNotificationVolume"))
+                    put("has_agc", data.audioInfo.getValue("hasAGC"))
+                    put("has_ns", data.audioInfo.getValue("hasNS"))
+                    put("has_aec", data.audioInfo.getValue("hasAEC"))
+                }
+                putJsonArray("sensors") {
+                    addAll(data.sensors)
                 }
             }
         }

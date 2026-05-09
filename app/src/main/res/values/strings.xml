@@ -27,6 +27,6 @@
     <string name="status_app_update_required">App update to v%1$s required</string>
     <string name="status_downloading_update">Downloading update</string>
     <string name="status_installing_update">Installing update</string>
-    <string name="stop_service">Stop Service</string>
+    <string name="close_app">Close App</string>
 
 </resources>

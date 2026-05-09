@@ -6,8 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ActivityCompat
@@ -16,22 +16,26 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import com.google.firebase.Firebase
-import com.google.firebase.crashlytics.crashlytics
 import com.msp1974.vacompanion.MainActivity
 import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.VACAApplication
+import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.BackgroundTaskStatus
+import com.msp1974.vacompanion.utils.FirebaseManager
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Timer
 import java.util.TimerTask
+import javax.inject.Inject
 
+@AndroidEntryPoint
+class VAForegroundService @Inject constructor() : LifecycleService() {
 
-class VAForegroundService : LifecycleService() {
-    private lateinit var config: APPConfig
-    private var wifiLock: WifiManager.WifiLock? = null
+    @Inject lateinit var config: APPConfig
+
+    private lateinit var firebase: FirebaseManager
     private var keyguardLock: KeyguardManager.KeyguardLock? = null
     private var watchdogTimer: Timer = Timer()
 
@@ -48,11 +52,8 @@ class VAForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        config = APPConfig.getInstance(this)
+        firebase = FirebaseManager.getInstance(this)
 
-        // wifi lock
-        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL, "vacompanion.VABackgroundService:wifiLock")
         // Some Amazon devices are not seeing this permission so we are trying to check
         val permission = "android.permission.DISABLE_KEYGUARD"
         val checkSelfPermission = ContextCompat.checkSelfPermission(this@VAForegroundService, permission)
@@ -85,14 +86,20 @@ class VAForegroundService : LifecycleService() {
                         .setSmallIcon(R.mipmap.ic_launcher)
                         .setContentTitle("View Assist Companion App")
                         .setContentText("Service is running")
-                        .addAction(
-                            R.drawable.outline_stop_circle_24, getString(R.string.stop_service),
-                            stopServiceIntent(Actions.STOP.toString())
-                        )
+                        .apply {
+                            if (isHomeApp()) {
+                                addAction(
+                                    R.drawable.outline_stop_circle_24, getString(R.string.close_app),
+                                    sendServiceIntent(Actions.STOP)
+                                )
+                            }
+                        }
                         .build()
 
+
+
                 lifecycleScope.launch {
-                    Firebase.crashlytics.log("Background service starting")
+                    firebase.addToCrashLog("Background service starting")
 
                     //need core 1.12 and higher and SDK 30 and higher
                     var requires: Int = 0
@@ -116,18 +123,15 @@ class VAForegroundService : LifecycleService() {
                         },
                     )
 
-                    if (!wifiLock!!.isHeld) {
-                        wifiLock!!.acquire()
-                    }
                     try {
                         keyguardLock?.disableKeyguard()
                     } catch (ex: Exception) {
                         Timber.i("Disabling keyguard didn't work")
                         ex.printStackTrace()
-                        Firebase.crashlytics.recordException(ex)
+                        firebase.logException(ex)
                     }
 
-                    backgroundTask = BackgroundTaskController(this@VAForegroundService)
+                    backgroundTask = BackgroundTaskController(this@VAForegroundService, config)
                     backgroundTask?.start()
                     Timber.i("Background Service Started")
                     config.backgroundTaskRunning = true
@@ -146,13 +150,13 @@ class VAForegroundService : LifecycleService() {
                     //        Timber.e("Foreground service failed to launch activity - ${ex.message}")
                     //    }
                     //}
-                    restartActivityWatchdog()
+                    //restartActivityWatchdog()
                 }
             }
 
             Actions.STOP.toString() -> {
-                Firebase.crashlytics.log("Background service stopping")
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                Timber.d("Stopping foreground service")
+                BroadcastSender.sendBroadcast(this, BroadcastSender.CLOSE_APP)
                 stopSelf()
             }
         }
@@ -180,9 +184,9 @@ class VAForegroundService : LifecycleService() {
         },0,5000)
     }
 
-    private fun stopServiceIntent(name: String): PendingIntent {
+    private fun sendServiceIntent(action: Actions): PendingIntent {
         val intent = Intent(this, VAForegroundService::class.java)
-        intent.setAction(name)
+        intent.setAction(action.toString())
         val pendingIntent = PendingIntent.getService(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return pendingIntent
     }
@@ -197,20 +201,27 @@ class VAForegroundService : LifecycleService() {
         Timber.i("Stopping Background Service")
         watchdogTimer.cancel()
         backgroundTask?.shutdown()
+
         config.backgroundTaskRunning = false
         config.backgroundTaskStatus = BackgroundTaskStatus.NOT_STARTED
 
-        // Release any lock from this app
-        if (wifiLock != null && wifiLock!!.isHeld) {
-            wifiLock!!.release()
-        }
         try {
             keyguardLock!!.reenableKeyguard()
         } catch (ex: Exception) {
             Timber.i("Enabling keyguard didn't work")
             ex.printStackTrace()
-            Firebase.crashlytics.recordException(ex)
+            firebase.logException(ex)
         }
     }
 
+    fun isHomeApp(): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN)
+        intent.addCategory(Intent.CATEGORY_HOME)
+        val res: ResolveInfo? = packageManager.resolveActivity(intent, 0)
+        if (res?.activityInfo != null && packageName.equals(res.activityInfo.packageName)
+        ) {
+            return true
+        }
+        return false
+    }
 }

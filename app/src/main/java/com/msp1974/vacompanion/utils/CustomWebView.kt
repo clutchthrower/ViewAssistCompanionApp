@@ -62,23 +62,29 @@ class CustomWebView @JvmOverloads constructor(
             mediaPlaybackRequiresUserGesture = false
             safeBrowsingEnabled = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            textZoom = 100
+            useWideViewPort = true
+            loadWithOverviewMode = true
             setSupportZoom(true)
             builtInZoomControls = false
-            useWideViewPort = false
-            loadWithOverviewMode = true
+            displayZoomControls = false
             cacheMode = WebSettings.LOAD_DEFAULT
 
             webChromeClient = CustomWebChromeClient(context)
         }
 
         // Add JS interfaces
+        removeJavascriptInterface("Android")
         addJavascriptInterface(androidInterface, "Android")
+
         if (webViewClient::class == CustomWebViewClient::class) {
             val webViewClientA = webViewClient as CustomWebViewClient
+            removeJavascriptInterface("ViewAssistApp")
             addJavascriptInterface(WebAppInterface(webViewClientA.config, ViewAssistEventHandler), "ViewAssistApp")
+
+            removeJavascriptInterface("externalApp")
             addJavascriptInterface(WebViewJavascriptInterface(this, AuthUtils(config).externalAuthCallback), "externalApp")
         }
-
     }
 
     val ViewAssistEventHandler = object : ViewAssistCallback {
@@ -131,9 +137,24 @@ class CustomWebView @JvmOverloads constructor(
 
     }
 
+    fun setTextSize(level: Int) {
+        if (level == 0) {
+            settings.textZoom = 100
+        } else {
+            settings.textZoom = level
+        }
+
+    }
+
     fun setPageLoadingState(stage: PageLoadingStage) {
         val w = webViewClient as CustomWebViewClient
         w.setPageLoadingState(stage)
+    }
+
+    fun refresh() {
+        val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
+        log.d("Loading URL: $url")
+        loadUrl(url)
     }
 
     companion object {
