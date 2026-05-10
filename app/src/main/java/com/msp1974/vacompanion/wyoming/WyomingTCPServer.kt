@@ -289,7 +289,9 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
         if (satellite != null) {
             if (satellite?.state == SatelliteState.RUNNING) {
                 Timber.d("Satellite already running - updating clientId")
-                satellite?.setNewClientId(clientId)
+                scope.launch {
+                    satellite?.handleSatelliteTakeover(clientId)
+                }
                 return
             } else if (satellite?.state == SatelliteState.STOPPING) {
                 try {

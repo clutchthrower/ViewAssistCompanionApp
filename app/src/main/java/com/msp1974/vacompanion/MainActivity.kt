@@ -322,6 +322,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         // Add broadcast receiver
         val filter = IntentFilter().apply {
             addAction(BroadcastSender.SATELLITE_STARTED)
+            addAction(BroadcastSender.SATELLITE_CLIENT_UPDATED)
             addAction(BroadcastSender.SATELLITE_STOPPED)
             addAction(BroadcastSender.VERSION_MISMATCH)
             addAction(BroadcastSender.WEBVIEW_CRASH)

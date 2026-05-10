@@ -20,6 +20,7 @@ import com.msp1974.vacompanion.wakeword.WakeWordDownloader
 import com.msp1974.vacompanion.wakeword.WakeWordEngineProvider
 import com.msp1974.vacompanion.wyoming.SatelliteState
 import com.msp1974.vacompanion.wyoming.WyomingPacket
+import io.github.z4kn4fein.semver.toVersion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -98,6 +99,13 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
             }
         }
 
+        // Verify app version
+        if (!validateAppVersion()) {
+            BroadcastSender.sendBroadcast(context, BroadcastSender.VERSION_MISMATCH)
+            state = SatelliteState.STOPPED
+            return
+        }
+
         // Not ready for release
         //wakeWordDownloader.downloadsNeeded(config.customFiles)
 
@@ -158,9 +166,28 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         )
     }
 
-    fun setNewClientId(clientId: String) {
-        this.clientId = clientId
-        BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_CLIENT_UPDATED)
+    suspend fun handleSatelliteTakeover(clientId: String) {
+        hasInitSettings = false
+        val loadedSettings = waitForSettings(5000)
+        if (!loadedSettings) {
+            // Try 1 more time in case of timing issue
+            sendSatelliteMessage(clientId,"custom-event", buildJsonObject {
+                put("event_type", "settings")
+            })
+            if (!waitForSettings(2000)) {
+                state = SatelliteState.ERROR
+                return
+            }
+        }
+
+        // Verify app version
+        if (!validateAppVersion()) {
+            stop()
+            start()
+        } else {
+            this.clientId = clientId
+            BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_CLIENT_UPDATED)
+        }
     }
 
     suspend fun stop() {
@@ -181,6 +208,15 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
         stopSensors()
         state = SatelliteState.STOPPED
         BroadcastSender.sendBroadcast(context, BroadcastSender.SATELLITE_STOPPED)
+    }
+
+    fun validateAppVersion(): Boolean {
+        // Verify app version
+        if (config.version.toVersion() < config.minRequiredApkVersion.toVersion() ) {
+            Timber.w("Does not meet min app version requirement. Version: ${config.version}, Min: ${config.minRequiredApkVersion} ")
+            return false
+        }
+        return true
     }
 
     suspend fun processMessage(packet: WyomingPacket) {
