@@ -333,10 +333,8 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
             // if wake up on ww, send event
             if (config.screenOnWakeWord) {
-                config.eventBroadcaster.notifyEvent(Event("screenOn",
-                    oldValue = false,
-                    newValue = true
-                ))
+                config.screenOn = true
+                config.screenSaver = false
             }
             startAudioPipeline(PipelineStartMode.WAKE_WORD_DETECTED)
             playWakeWordDetectionSound()

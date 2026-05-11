@@ -173,19 +173,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                         .fillMaxSize(),
                     color = Color.Black
                 ) {
-                    if (vaUiState.satelliteRunning) {
-                        if (vaUiState.screenBlank) {
-                            BlackScreen()
-                        } else {
-                            WebViewScreen(webView)
-                        }
-                    } else {
-                        if (vaUiState.screenBlank) {
-                            BlackScreen()
-                        } else {
-                            ConnectionScreen()
-                        }
+                    when {
+                        vaUiState.screenBlank -> BlackScreen()
+                        vaUiState.satelliteRunning -> WebViewScreen(webView)
+                        else -> ConnectionScreen()
                     }
+
                     when {
                         vaUiState.alertDialog != null -> {
                             VADialog(
@@ -229,7 +222,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
     fun setScreenSettings() {
         // Hide system bars
-        Timber.d("Setting screen settings")
+        Timber.d("Setting screen settings: Initialised: $initialised, ScreenOffStart: $screenOffStartUp, Sat Running: ${viewModel.vacaState.value.satelliteRunning}")
         screen.hideSystemUI(window)
 
         if (!initialised) {
@@ -238,7 +231,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
             if (screenOffStartUp) {
                 config.screenBrightness = screen.getScreenBrightness()
-                setScreenSaver(true)
+                screenSaver(true)
                 screenWake()
             } else {
                 if (config.screenBrightness <= 0.3) config.screenBrightness = 0.6f
@@ -247,7 +240,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 config.screenTimeout = screen.getScreenTimeout()
                 if (config.screenTimeout < 15000) config.screenTimeout = 15000
                 screen.setScreenTimeout(config.screenTimeout)
-                setScreenSaver(false)
+                screenSaver(false)
             }
         } else if (viewModel.vacaState.value.satelliteRunning) {
             screen.setScreenBrightness(window, config.screenBrightness)
@@ -291,6 +284,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
 
     suspend fun initialiseApp() {
         Timber.d("Initialising.....")
+
+        if (!screenOffStartUp) {
+            screen.setScreenAlwaysOn(window, true)
+        }
+
         if (!viewModel.vacaState.value.permissions.hasCorePermissions) {
             setStatus(getString(R.string.status_no_permissions))
             Timber.w("No Permissions")
@@ -303,7 +301,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         while (!hasNetwork) {
             setStatus(getString(R.string.status_waiting_for_network))
             Timber.w("No Network...")
-            delay(1000)
+            delay(2000)
             hasNetwork = Helpers.isNetworkAvailable(this)
         }
         Timber.d("Network active")
@@ -343,8 +341,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         config.eventBroadcaster.addListener(this)
         config.currentActivity = "Main"
 
-        //registerWifiMonitor()
-
         // Start background tasks
         runBackgroundTasks()
     }
@@ -356,6 +352,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             when (intent.action) {
                 BroadcastSender.SATELLITE_STARTED -> {
                     viewModel.setSatelliteRunning(true)
+                    setScreenSettings()
                     webView.setZoomLevel(config.zoomLevel)
                     config.screenOn = screen.isScreenOn()
                     val url = AuthUtils.getURL(AuthUtils.getHAUrl(config))
@@ -391,12 +388,12 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 Intent.ACTION_SCREEN_ON -> {
                     if (initialised) {
                         // If woken by hardware buttons set screen config
-                        setScreenSettings()
+                        setScreenSaver(false)
                     }
-                    config.screenOn = true
+                    setScreenOn(true)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
-                    config.screenOn = false
+                    setScreenOn(false)
                 }
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> {
                     val dndEnabled = DeviceCapabilitiesManager.isDoNotDisturbEnabled(context)
@@ -503,11 +500,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
 
         if (screenOffStartUp) {
+            Timber.d("Screen off startup.  Reverting to screen off")
             delay(2000)
             screenSleep()
             screenOffStartUp = false
         }
-        setScreenSettings()
         initialised = true
         Timber.d("Initialised")
     }
@@ -554,7 +551,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 "refresh" -> webView.refresh()
                 "screenWake" -> screenWake()
                 "screenSleep" -> screenSleep()
-                "screenOn" -> if (event.newValue as Boolean) screenWake() else screenSleep()
+                "screenOn" -> screenOn(event.newValue as Boolean)
                 "screenSaver" -> screenSaver(event.newValue as Boolean)
                 "screenOrientationMode" -> setScreenOrientation(event.newValue as String)
                 "deviceBump" -> if (config.screenOnBump) screenWake()
@@ -610,8 +607,19 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun setScreenSaver(active: Boolean) {
-        screenSaver(active)
         config.screenSaver = active
+    }
+
+    fun screenOn(active: Boolean) {
+        if (active && screen.isScreenOff()) {
+            screenWake()
+        } else if (!active && screen.isScreenOn()) {
+            screenSleep()
+        }
+    }
+
+    fun setScreenOn(active: Boolean) {
+        config.screenOn = active
     }
 
     fun screenWake() {
@@ -619,6 +627,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         // Cancel any screen sleep timer
         if (screenSleepWaitJob != null && screenSleepWaitJob!!.isActive) {
             screenSleepWaitJob!!.cancel()
+            screenOffInProgress = false
         }
 
         // Experimental fix for screen not turning on on A15+
@@ -627,13 +636,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         } else {
             window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
-
         screen.wakeScreen()
-
-        screenOffInProgress = false
-        if (initialised) {
-            setScreenSaver(false)
-        }
     }
 
     fun screenSleep() {
@@ -658,7 +661,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     waitForScreenOff()
                 }
             } else {
-                config.screenOn = false
                 screenOffInProgress = false
             }
         }
@@ -676,7 +678,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             delay(1000)
             withTimeout(15000) {
                 while (!screen.isScreenOff()) {
-                    delay(500)
+                    delay(100)
                 }
             }
         } catch (ex: Exception) {
@@ -684,7 +686,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             screenOffInProgress = false
             return
         }
-        config.screenOn = false
         screenOffInProgress = false
         log.d("Screen off")
     }
