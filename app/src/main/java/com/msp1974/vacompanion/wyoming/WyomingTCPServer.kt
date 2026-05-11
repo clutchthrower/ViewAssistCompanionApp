@@ -131,7 +131,7 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                         put("remoteId", remoteAddress)
                     }
 
-                    val client: WyomingClientHandler = object : WyomingClientHandler(scope, socket!!) {
+                    val client: WyomingClientHandler = object : WyomingClientHandler(scope, socket) {
                         override suspend fun onClientDisconnected(clientId: String) {
 
                             if (clientId in clients) {
@@ -144,13 +144,8 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
 
                             if (clients.isEmpty()) {
                                 Timber.d("No clients connected")
-                                scope.launch {
-                                    // Stop satellite if connection lost for more than 15s
-                                    delay(15000)
-                                    if (clients.isEmpty()) {
-                                        stopSatellite()
-                                    }
-                                }
+                                satellite?.clientId = ""
+                                disconnectionMonitor()
                             }
                         }
 
@@ -200,6 +195,23 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
                     unregisterNSD()
                     state = ServerState.STOPPED
                     Timber.i("Wyoming TCP Server stopped")
+                }
+            }
+        }
+    }
+
+    fun disconnectionMonitor() {
+        val timeout = DISCONNECTION_TIMEOUT_MINS
+        val startTime = System.currentTimeMillis()
+        scope.launch {
+            // Stop satellite if connection lost for more than timeout
+            while (clients.isEmpty()) {
+                delay(1000)
+                val currentTime = System.currentTimeMillis()
+                if (startTime + (timeout * 60 * 1000) < currentTime) {
+                    Timber.w("Terminating Satellite due to network disconnection timeout after ${timeout}mins")
+                    stopSatellite()
+                    break
                 }
             }
         }
@@ -363,16 +375,19 @@ abstract class WyomingTCPServer(private val context: Context, val config: APPCon
     }
 
     fun sendMessage(clientId: String, type: String, data: JsonObject, payload: ByteArray = ByteArray(0)) {
-        if (satellite != null && clientId == satellite?.clientId) {
-            val packet = WyomingPacket(type, data, payload)
+        val packet = WyomingPacket(type, data, payload)
+        if (satellite != null && clientId != ""   && clientId == satellite?.clientId) {
             if (type !in IGNORED_LOG_EVENTS) {
                 Timber.d("Sending -> $clientId: ${packet.toMap()}")
             }
             clients[clientId]?.handler?.writeMessage(packet)
+        } else {
+            Timber.e("Failed sending -> $clientId: ${packet.toMap()}. No connection with that client id")
         }
     }
 
     companion object {
         private val IGNORED_LOG_EVENTS = setOf("ping", "pong", "audio-chunk")
+        private const val DISCONNECTION_TIMEOUT_MINS = 5
     }
 }

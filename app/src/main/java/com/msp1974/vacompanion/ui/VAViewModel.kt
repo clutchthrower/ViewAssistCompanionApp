@@ -3,7 +3,12 @@
 import android.app.Application
 import android.content.res.Configuration
 import android.content.res.Resources
+import androidx.lifecycle.application
+import androidx.lifecycle.viewModelScope
+import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
+import com.msp1974.vacompanion.data.ConnectionStatus
+import com.msp1974.vacompanion.data.ConnectionStatusManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Event
@@ -12,10 +17,12 @@ import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.satellite.AudioRouteOption
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -79,13 +86,15 @@ data class State(
     var permissions: PermissionsStatus = PermissionsStatus(),
     var updates: UpdateStatus = UpdateStatus(),
     var webViewPageLoadingStage: PageLoadingStage = PageLoadingStage.NOT_STARTED,
-    var showUUIDChangeDialog: Boolean = false
+    var showUUIDChangeDialog: Boolean = false,
+    var isNetworkConnected: Boolean = true
     )
 
 @HiltViewModel
 class VAViewModel @Inject constructor(
     application: Application,
-    val config: APPConfig
+    val config: APPConfig,
+    val connectionStatusManager: ConnectionStatusManager
 ): ViewModelBase(application), EventListener {
 
     private val _vacaState = MutableStateFlow(State())
@@ -99,6 +108,7 @@ class VAViewModel @Inject constructor(
         config.eventBroadcaster.addListener(this)
         initValues()
         buildAppInfo()
+        startNetworkMonitor()
     }
 
     fun initValues() {
@@ -113,6 +123,15 @@ class VAViewModel @Inject constructor(
                     muted = config.isMuted,
                 )
             )
+        }
+    }
+
+    fun startNetworkMonitor() {
+        connectionStatusManager.start()
+        viewModelScope.launch(Dispatchers.Default) {
+            connectionStatusManager.networkStatus.collect {
+                onNetworkStateChange(it.status)
+            }
         }
     }
 
@@ -274,7 +293,16 @@ class VAViewModel @Inject constructor(
         }
     }
 
-    fun onNetworkStateChange() {
+    fun onNetworkStateChange(status: ConnectionStatus) {
+        Timber.d("Network status: $status")
+        _vacaState.update { currentState ->
+            currentState.copy(
+                isNetworkConnected = status == ConnectionStatus.CONNECTED
+            )
+        }
+        if (status == ConnectionStatus.DISCONNECTED) {
+            setStatusMessage(application.getString(R.string.status_waiting_for_network))
+        }
         buildAppInfo()
     }
 

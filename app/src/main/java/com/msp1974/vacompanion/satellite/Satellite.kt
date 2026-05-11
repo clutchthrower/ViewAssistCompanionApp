@@ -304,6 +304,10 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
     suspend fun handleWakeWordDetection() {
+        if (clientId == "") {
+            Timber.e("Unable to run audio pipeline. Satellite not connected to HA")
+            return
+        }
         soundEffectFinishTime = 0L
         var startNewPipeline = audioPipeline == null || audioPipeline?.pipelineStage == PipelineStage.ENDED
 
@@ -512,7 +516,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 "pause" -> mediaManager.musicPlayer.pause()
                 "stop" ->  mediaManager.musicPlayer.stop()
                 "set-volume" -> if (payloadStr.isNotEmpty()) {
-                    mediaManager.musicPlayer.setVolume(Json.parseToJsonElement(payloadStr).jsonObject["volume"]?.jsonPrimitive?.floatOrNull ?: 90f)
+                   mediaManager.musicPlayer.setVolume(Json.parseToJsonElement(payloadStr).jsonObject["volume"]?.jsonPrimitive?.floatOrNull ?: 90f)
                 }
             }
         }

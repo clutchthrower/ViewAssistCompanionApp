@@ -364,7 +364,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 }
                 BroadcastSender.SATELLITE_CLIENT_UPDATED -> {
                     if (viewModel.vacaState.value.webViewPageLoadingStage == PageLoadingStage.ERROR) {
-                        webView.reload()
+                        webView.refresh()
                     }
                 }
                 BroadcastSender.SATELLITE_STOPPED -> {
@@ -414,30 +414,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         }
     }
 
-    fun registerWifiMonitor() {
-        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        Timber.d("Registering Wifi monitor")
-        connectivityManager.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                log.i("Network connection available")
-                hasNetwork = true
-                viewModel.onNetworkStateChange()
-                setStatus(getString(R.string.status_waiting_for_connection))
-            }
 
-            override fun onLost(network: Network) {
-                log.e("Lost network connection")
-                hasNetwork = false
-                lifecycleScope.launch {
-                    delay(10000)
-                    if (!hasNetwork) {
-                        viewModel.onNetworkStateChange()
-                        setStatus(getString(R.string.status_waiting_for_network))
-                    }
-                }
-            }
-        })
-    }
 
     fun setStatus(status: String) {
         viewModel.setStatusMessage(status)
