@@ -205,7 +205,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                 setNegativeButton(resources.getString(R.string.dialog_button_no)) { _: DialogInterface?, _: Int ->
                     super.onReceivedSslError(view, handler, error)
                     setPageLoadingState(PageLoadingStage.ERROR)
-                    view.loadUrl("file:///android_asset/web/error.html")
+                    view.loadUrl(ERROR_URL)
                 }
             }.create().show()
         } else {
