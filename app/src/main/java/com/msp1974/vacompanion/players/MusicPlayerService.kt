@@ -38,6 +38,7 @@ class MusicPlayerService() : Service() {
     private var focusRequest: AudioFocusRequestCompat? = null
     private var hasAudioFocus = false
     private var musicVolume: Float = 1f
+    private var ducked: Boolean = false
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Default + job)
@@ -100,7 +101,7 @@ class MusicPlayerService() : Service() {
     }
 
     fun resume() {
-        Timber.d("Resuming music")
+        Timber.d("Music player: Resuming music")
         mediaPlayer?.let { player ->
             if (!player.isPlaying) {
                 if (requestAudioFocus()) {
@@ -112,7 +113,7 @@ class MusicPlayerService() : Service() {
     }
 
     fun stop() {
-        Timber.d("Stopping music")
+        Timber.d("Music player: Stopping music")
         mediaPlayer?.let { player ->
             try {
                 player.stop()
@@ -126,8 +127,10 @@ class MusicPlayerService() : Service() {
     }
 
     fun setVolume(volume: Float) {
-        musicVolume = volume / 100f
-        mediaPlayer?.volume = musicVolume
+        if (!ducked) {
+            musicVolume = volume / 100f
+            mediaPlayer?.volume = musicVolume
+        }
     }
 
     @SuppressLint("UnsafeOptInUsageError")
@@ -141,6 +144,7 @@ class MusicPlayerService() : Service() {
                 when (focusChange) {
                     AudioManager.AUDIOFOCUS_GAIN -> {
                         hasAudioFocus = true
+                        Timber.d("Music player: Audio focus restored")
                         resume()
                     }
 
@@ -155,7 +159,10 @@ class MusicPlayerService() : Service() {
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                        mediaPlayer?.volume = getDuckingVolume()
+                        val duckVolume = getDuckingVolume()
+                        Timber.d("Music player: Ducking volume to $duckVolume")
+                        mediaPlayer?.volume = duckVolume
+                        ducked = true
                     }
                 }
             }
@@ -169,27 +176,30 @@ class MusicPlayerService() : Service() {
     }
 
     private fun getDuckingVolume(): Float {
-        return min(config.duckingVolume / 30f, musicVolume)
+        return min(config.duckingVolume / 50f, musicVolume)
     }
 
     private fun animateUnDuckingVolume (
-        durationMs: Long = 1000,
+        durationMs: Long = 1500,
         steps: Int = 5
     ) {
+        Timber.d("Music player: Un-ducking volume")
         val delay = durationMs / steps
         val currentVolume = mediaPlayer?.volume ?: 1f
         val increment = (musicVolume - currentVolume) / steps
-
-        if (increment < 0) return
-
         scope.launch {
-            for (i in 1..steps) {
-                val vol = currentVolume + (i * increment)
-                withContext(Dispatchers.Main) {
-                    mediaPlayer?.volume = vol
+            if (increment > 0) {
+                for (i in 1..steps) {
+                    val vol = currentVolume + (i * increment)
+                    Timber.d("Music player: setting volume to $vol")
+                    withContext(Dispatchers.Main) {
+                        mediaPlayer?.volume = vol
+                    }
                     delay(delay)
                 }
             }
+            delay(2000)
+            ducked = false
         }
     }
 
