@@ -22,18 +22,31 @@ import com.msp1974.vacompanion.ui.VAViewModel
 import timber.log.Timber
 import java.net.URL
 import androidx.core.net.toUri
+import androidx.lifecycle.viewModelScope
+import com.msp1974.vacompanion.data.ConnectionStatus
+import kotlinx.coroutines.launch
 
 class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     val log = Logger()
     val config = viewModel.config
+    val connectionStatusManager = viewModel.connectionStatusManager
     private val firebase = FirebaseManager.getInstance(config.context)
     private val resources = viewModel.resources
+    private var connectionStatus = ConnectionStatus.CONNECTED
 
     companion object {
 
         private const val APP_PREFIX = "app://"
         private const val INTENT_PREFIX = "intent:"
         private const val ERROR_URL = "file:///android_asset/web/error.html"
+    }
+
+    init {
+        viewModel.viewModelScope.launch {
+            connectionStatusManager.networkStatus.collect {
+                connectionStatus = it.status
+            }
+        }
     }
 
     override fun onRenderProcessGone(
