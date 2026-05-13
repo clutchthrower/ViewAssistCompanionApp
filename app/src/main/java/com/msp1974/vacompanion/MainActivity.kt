@@ -636,6 +636,11 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
         } else {
             window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
+
+        // Ensure on every wake that screen timeout is correct
+        if (screen.getScreenTimeout() != config.screenTimeout) {
+            screen.setScreenTimeout(config.screenTimeout)
+        }
         screen.wakeScreen()
     }
 
@@ -645,9 +650,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             return
         }
         Timber.d("Sleeping screen")
-        if (permissions.isDeviceAdmin()) {
+        val hasDeviceAdmin = permissions.isDeviceAdmin()
+        if (hasDeviceAdmin) {
             screen.setPartialWakeLock()
-            lockScreen()
+            screen.lockScreen()
             return
         }
 
@@ -663,13 +669,6 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
             } else {
                 screenOffInProgress = false
             }
-        }
-    }
-
-    fun lockScreen() {
-        if (permissions.isDeviceAdmin()) {
-            val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            dpm.lockNow()
         }
     }
 

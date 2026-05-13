@@ -1,5 +1,6 @@
 package com.msp1974.vacompanion.device
 
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
@@ -15,7 +16,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Logger
-import javax.inject.Inject
 
 class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper(context) {
     var log = Logger()
@@ -149,6 +149,11 @@ class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper
         wakeLock?.acquire()
     }
 
+    fun lockScreen() {
+        val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        dpm.lockNow()
+    }
+
     fun canWriteScreenSetting(): Boolean {
         return Settings.System.canWrite(applicationContext)
     }
@@ -157,7 +162,7 @@ class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return display.state == Display.STATE_ON
         } else {
-            val wm = context.getSystemService(WINDOW_SERVICE) as WindowManager
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
             return wm.defaultDisplay.state == Display.STATE_ON
         }
     }
@@ -166,7 +171,7 @@ class ScreenUtils (val context: Context, val config: APPConfig) : ContextWrapper
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return display.state == Display.STATE_OFF
         } else {
-            val wm = context.getSystemService(WINDOW_SERVICE) as WindowManager
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
             return wm.defaultDisplay.state == Display.STATE_OFF
         }
     }

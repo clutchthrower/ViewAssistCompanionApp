@@ -221,7 +221,7 @@ class APPConfig @Inject constructor(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var screenTimeout: Int by Delegates.observable(3000) { property, oldValue, newValue ->
+    var screenTimeout: Int by Delegates.observable(300000) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
