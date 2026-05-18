@@ -87,9 +87,11 @@ abstract class SatelliteAudioPipeline(
     var pipelineStage = PipelineStage.INIT
         set(value) {
             // Only allow increasing statuses
-            field = if (value.ordinal > pipelineStage.ordinal) value else field
-            stageStartTime = System.currentTimeMillis()
-            onStateChange(value)
+            if (value.ordinal > pipelineStage.ordinal) {
+                field = value
+                stageStartTime = System.currentTimeMillis()
+                onStateChange(value)
+            }
         }
 
     var silenceAudioBefore: Long = 0L
