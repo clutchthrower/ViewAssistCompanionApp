@@ -17,8 +17,6 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
@@ -26,7 +24,6 @@ import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -371,6 +368,8 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                     }
                 }
                 BroadcastSender.VERSION_MISMATCH -> {
+                    screenSaver(false)
+                    setScreenOn(true)
                     runUpdateRoutine()
                 }
                 BroadcastSender.REQUEST_MISSING_PERMISSIONS -> {
