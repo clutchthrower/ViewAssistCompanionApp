@@ -162,6 +162,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 putJsonObject("sensors", {
                     put("do_not_disturb", DeviceCapabilitiesManager.isDoNotDisturbEnabled(context))
                 })
+                putJsonObject("media_player", {
+                    put("playing", false)
+                })
             }
         )
     }

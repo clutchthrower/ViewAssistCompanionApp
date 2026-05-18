@@ -72,10 +72,8 @@ class MusicPlayerService() : Service() {
                 }
             mediaPlayer?.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (!isPlaying) {
-                        val event = Event("musicPlayerStopped", false, newValue = true)
-                        config.eventBroadcaster.notifyEvent(event)
-                    }
+                    val event = Event("musicPlayerPlayingStatus", oldValue = !isPlaying, newValue = isPlaying)
+                    config.eventBroadcaster.notifyEvent(event)
 
                     super.onIsPlayingChanged(isPlaying)
                 }
@@ -148,6 +146,8 @@ class MusicPlayerService() : Service() {
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun requestAudioFocus(): Boolean {
+        if (hasAudioFocus) return hasAudioFocus
+
         focusRequest = AudioFocusRequestCompat.Builder(AudioManagerCompat.AUDIOFOCUS_GAIN)
             .setAudioAttributes(audioAttributes)
             .setAcceptsDelayedFocusGain(true)
@@ -172,6 +172,7 @@ class MusicPlayerService() : Service() {
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                        hasAudioFocus = false
                         val duckVolume = getDuckingVolume()
                         Timber.d("Music player: Ducking volume to $duckVolume")
                         mediaPlayer?.volume = duckVolume
@@ -182,7 +183,6 @@ class MusicPlayerService() : Service() {
             .build();
 
         val result = AudioManagerCompat.requestAudioFocus(audioManager, focusRequest!!)
-
         hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Timber.d("Music requestAudioFocus: $result")
         return hasAudioFocus
