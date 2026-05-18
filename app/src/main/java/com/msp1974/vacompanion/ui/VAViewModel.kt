@@ -3,6 +3,7 @@
 import android.app.Application
 import android.content.res.Configuration
 import android.content.res.Resources
+import androidx.datastore.core.Closeable
 import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.msp1974.vacompanion.R
@@ -16,6 +17,7 @@ import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.satellite.AudioRouteOption
+import com.msp1974.vacompanion.utils.Network
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,16 +97,20 @@ class VAViewModel @Inject constructor(
     application: Application,
     val config: APPConfig,
     val connectionStatusManager: ConnectionStatusManager
-): ViewModelBase(application), EventListener {
+): ViewModelBase(application), EventListener, Closeable {
 
     private val _vacaState = MutableStateFlow(State())
     val vacaState: StateFlow<State> = _vacaState.asStateFlow()
 
     var resources: Resources = application.resources
     var permissions: Permissions = Permissions(application.applicationContext, config)
+    val network = Network(application.applicationContext)
 
     init {
         _vacaState.value = State()
+
+        network.setWifiLock()
+
         config.eventBroadcaster.addListener(this)
         initValues()
         buildAppInfo()
@@ -124,6 +130,10 @@ class VAViewModel @Inject constructor(
                 )
             )
         }
+    }
+
+    override fun close() {
+        network.releaseWifiLock()
     }
 
     fun startNetworkMonitor() {
