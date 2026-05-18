@@ -15,11 +15,14 @@ import androidx.media3.common.audio.AudioFocusRequestCompat
 import androidx.media3.common.audio.AudioManagerCompat
 import androidx.media3.exoplayer.ExoPlayer
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.Event
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -67,6 +70,16 @@ class MusicPlayerService() : Service() {
                 .build().apply {
                     repeatMode = Player.REPEAT_MODE_OFF
                 }
+            mediaPlayer?.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (!isPlaying) {
+                        val event = Event("musicPlayerStopped", false, newValue = true)
+                        config.eventBroadcaster.notifyEvent(event)
+                    }
+
+                    super.onIsPlayingChanged(isPlaying)
+                }
+            })
         }
 
         val url = intent?.getStringExtra("url") ?: ""
@@ -149,7 +162,7 @@ class MusicPlayerService() : Service() {
                     }
 
                     AudioManager.AUDIOFOCUS_LOSS -> {
-                        //hasAudioFocus = false
+                        hasAudioFocus = false
                         //pause()
                     }
 

@@ -153,6 +153,15 @@ class SatelliteCustomEventHandler(
             "motionDetectionSensitivity" -> {
                 satellite.motionTask.setSensitivity(event.newValue as Int)
             }
+            "musicPlayerStopped" -> {
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("media_player", {
+                            put("playing", false)
+                        })
+                    }
+                )
+            }
             else -> consumed = false
         }
         if (consumed) {
