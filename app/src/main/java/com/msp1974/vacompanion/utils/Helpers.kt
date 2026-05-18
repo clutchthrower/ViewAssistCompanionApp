@@ -59,5 +59,7 @@ class Helpers {
             var dotOccurred = 0
             return input.all { it in integerChars || it == '.' && dotOccurred++ < 1 }
         }
+
+        fun Float.round(decimals: Int = 2): Float  = "%.${decimals}f".format(this).toFloat()
     }
 }
