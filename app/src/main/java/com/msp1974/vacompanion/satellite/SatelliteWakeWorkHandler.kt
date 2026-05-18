@@ -2,11 +2,8 @@ package com.msp1974.vacompanion.satellite
 
 import android.Manifest
 import android.content.Context
-import com.msp1974.vacompanion.audio.MicrophoneInput
-import com.msp1974.vacompanion.audio.VACAAudioFormat
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
 import com.msp1974.vacompanion.settings.APPConfig
-import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.FirebaseManager
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.wakeword.WakeWordEngine
@@ -19,13 +16,9 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
-import java.util.LinkedList
-import javax.inject.Inject
 import kotlin.collections.set
 
 enum class WakeWordHandlerState {

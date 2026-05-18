@@ -1,7 +1,6 @@
 package com.msp1974.vacompanion.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,15 +26,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.msp1974.vacompanion.ui.theme.CustomColours
+import com.msp1974.vacompanion.utils.Helpers.Companion.round
 
 
 @Composable
 fun InfoGauge(
     canvasSize: Dp = 150.dp,
-    indicatorValue: Int = 0,
+    indicatorValue: Float = 0.0f,
     disabled: Boolean = false,
     disabledText: String = "",
     maxIndicatorValue: Int = 100,
+    decimalPlaces: Int = 0,
     backgroundIndicatorColor: Color = Color.White.copy(alpha = 0.3f),
     indicatorStrokeWidth: Float = 20f,
     foregroundIndicatorColor: Color = CustomColours.GREEN,
@@ -48,17 +49,17 @@ fun InfoGauge(
     smallTextColor: Color = Color.White
 ) {
     var allowedIndicatorValue by remember {
-        mutableIntStateOf(maxIndicatorValue)
+        mutableFloatStateOf(maxIndicatorValue.toFloat())
     }
     allowedIndicatorValue = if (indicatorValue <= maxIndicatorValue) {
         indicatorValue
     } else {
-        maxIndicatorValue
+        maxIndicatorValue.toFloat()
     }
 
     var animatedIndicatorValue by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(key1 = allowedIndicatorValue) {
-        animatedIndicatorValue = allowedIndicatorValue.toFloat()
+        animatedIndicatorValue = allowedIndicatorValue
     }
 
     val percentage =
@@ -69,7 +70,7 @@ fun InfoGauge(
         animationSpec = tween(300)
     )
 
-    val receivedValue by animateIntAsState(
+    val receivedValue by animateFloatAsState(
         targetValue = allowedIndicatorValue,
         animationSpec = tween(300)
     )
@@ -98,7 +99,7 @@ fun InfoGauge(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         EmbeddedElements(
-            bigText = receivedValue,
+            bigText = "%.${decimalPlaces}f".format(receivedValue),
             bigTextFontSize = bigTextFontSize,
             bigTextColor = bigTextColor,
             bigTextSuffix = bigTextSuffix,
@@ -160,7 +161,7 @@ fun DrawScope.foregroundIndicator(
 
 @Composable
 fun EmbeddedElements(
-    bigText: Int,
+    bigText: String,
     bigTextFontSize: TextUnit,
     bigTextColor: Color,
     bigTextSuffix: String,
@@ -187,7 +188,7 @@ fun EmbeddedElements(
         )
     } else {
         Text(
-            text = if (bigTextSuffix.isEmpty()) "$bigText" else "$bigText ${bigTextSuffix.take(2)}",
+            text = if (bigTextSuffix.isEmpty()) bigText else "$bigText ${bigTextSuffix.take(2)}",
             color = bigTextColor,
             fontSize = bigTextFontSize,
             textAlign = TextAlign.Center,
@@ -200,10 +201,11 @@ fun EmbeddedElements(
 @Preview(showBackground = true)
 fun InfoGaugePreview() {
     InfoGauge(
-        indicatorValue = 5,
+        indicatorValue = 5.8f,
+        decimalPlaces = 1,
         maxIndicatorValue = 10,
         smallText = "Detection",
         disabledText = "Muted",
-        disabled = true
+        disabled = false
     )
 }
