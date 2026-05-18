@@ -65,7 +65,7 @@ class MicrophoneInput (
             if (useSpeex && !AutomaticGainControl.isAvailable()) {
                 speex.echoSuppressionEnabled = false
                 speex.denoiseEnabled = false
-                speex.setMaxAGCGain(10f + (config.micGain * 1.95f))
+                speex.setMaxAGCGain(20f + (config.micGain * 1.95f))
                 return speex.processFrame(audioBuffer.copyOfRange(0, readCount))
             }
             return audioBuffer.copyOfRange(0, readCount)
