@@ -2,6 +2,7 @@ package com.msp1974.vacompanion.wakeword
 
 import android.content.Context
 import com.msp1974.vacompanion.settings.APPConfig
+import com.msp1974.vacompanion.utils.Helpers.Companion.round
 import com.msp1974.vacompanion.utils.WakeWords
 import com.msp1974.vacompanion.wakeword.microwakeword.MicroWakeWordEngine
 import com.msp1974.vacompanion.wakeword.microwakeword.providers.AssetWakeWordProvider
@@ -125,13 +126,19 @@ open class WakeWordEngine(val context: Context, val config: APPConfig, val engin
                                 it.detection.wakeWordId,
                                 it.detection.wakeWord,
                                 it.detection.score >= config.wakeWordThreshold,
-                                it.detection.score
+                                it.detection.score.round(2)
                             )
                             emit(WakeWordEngineProvider.AudioResult.WakeDetected(detectInfo))
                         }
 
                         is WakeWordEngineProvider.AudioResult.StopDetected -> {
-                            emit(it)
+                            val detectInfo = WakeWordEngineProvider.WakeWordDetection(
+                                it.detection.wakeWordId,
+                                it.detection.wakeWord,
+                                it.detection.score >= config.wakeWordThreshold,
+                                it.detection.score.round(2)
+                            )
+                            emit(WakeWordEngineProvider.AudioResult.StopDetected(detectInfo))
                         }
 
                         is WakeWordEngineProvider.AudioResult.Audio -> {

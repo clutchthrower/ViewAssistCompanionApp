@@ -49,7 +49,7 @@ fun DiagnosticBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             InfoGauge(
-                indicatorValue = (diagnosticInfo.audioLevel).toInt(),
+                indicatorValue = diagnosticInfo.audioLevel,
                 maxIndicatorValue = 100,
                 smallText = "Mic Level",
                 foregroundIndicatorColor = CustomColours.GREEN,
@@ -57,8 +57,9 @@ fun DiagnosticBar(
                 disabled = diagnosticInfo.muted
             )
             InfoGauge(
-                indicatorValue = (diagnosticInfo.detectionLevel).toInt(),
+                indicatorValue = diagnosticInfo.detectionLevel,
                 maxIndicatorValue = 10,
+                decimalPlaces = 1,
                 smallText = "Detection",
                 foregroundIndicatorColor = if (diagnosticInfo.detectionLevel >= diagnosticInfo.detectionThreshold) CustomColours.GREEN else CustomColours.AMBER,
                 disabledText = "Disabled",
@@ -104,7 +105,7 @@ fun DiagnosticBarPreview() {
         modifier = Modifier.background(Color.White),
         diagnosticInfo = DiagnosticInfo(
             audioLevel = 50f,
-            detectionLevel = 8f,
+            detectionLevel = 8.1f,
             detectionThreshold = 5f,
             vadDetection = true
         )

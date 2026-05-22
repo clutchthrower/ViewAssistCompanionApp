@@ -22,18 +22,31 @@ import com.msp1974.vacompanion.ui.VAViewModel
 import timber.log.Timber
 import java.net.URL
 import androidx.core.net.toUri
+import androidx.lifecycle.viewModelScope
+import com.msp1974.vacompanion.data.NetworkStatus
+import kotlinx.coroutines.launch
 
 class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     val log = Logger()
     val config = viewModel.config
+    val networkStatusManager = viewModel.networkStatusManager
     private val firebase = FirebaseManager.getInstance(config.context)
     private val resources = viewModel.resources
+    private var networkStatus = NetworkStatus.Available
 
     companion object {
 
         private const val APP_PREFIX = "app://"
         private const val INTENT_PREFIX = "intent:"
         private const val ERROR_URL = "file:///android_asset/web/error.html"
+    }
+
+    init {
+        viewModel.viewModelScope.launch {
+            networkStatusManager.networkStatus.collect {
+                networkStatus = it.status
+            }
+        }
     }
 
     override fun onRenderProcessGone(
@@ -192,7 +205,7 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
                 setNegativeButton(resources.getString(R.string.dialog_button_no)) { _: DialogInterface?, _: Int ->
                     super.onReceivedSslError(view, handler, error)
                     setPageLoadingState(PageLoadingStage.ERROR)
-                    view.loadUrl("file:///android_asset/web/error.html")
+                    view.loadUrl(ERROR_URL)
                 }
             }.create().show()
         } else {

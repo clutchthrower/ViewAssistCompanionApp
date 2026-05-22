@@ -16,6 +16,7 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.PageLoadingStage
+import timber.log.Timber
 import kotlin.random.Random
 
 data class AuthToken(val tokenType: String = "", val accessToken: String = "", val expires: Long = 0, val refreshToken: String = "")
@@ -24,37 +25,49 @@ class AuthUtils(val config: APPConfig) {
 
     // Add external auth callback for HA authentication
     val externalAuthCallback = object : ExternalAuthCallback {
-        override fun onRequestExternalAuth(view: WebView) {
+        override fun onRequestExternalAuth(view: WebView, payload: String) {
+            val json = Json { ignoreUnknownKeys = true }
+            val payloadJson = json.parseToJsonElement(payload).jsonObject
+            val force = payloadJson["force"]?.jsonPrimitive?.boolean ?: false
+
             log.d("External auth callback in progress...")
             setAuthStage(view, PageLoadingStage.AUTHORISING)
             if (config.refreshToken == "") {
-                log.d("No refresh token.  Proceeding to login screen")
-                loadUrl(view, getAuthUrl(getHAUrl(config, withDashboardPath = false)), clearCache = true)
+                Timber.d("No refresh token.  Proceeding to login screen")
+                loadUrl(
+                    view,
+                    getAuthUrl(getHAUrl(config, withDashboardPath = false)),
+                    clearCache = true
+                )
                 setAuthStage(view, PageLoadingStage.AUTH_FAILED)
                 return
-            } else if (System.currentTimeMillis() > (config.tokenExpiry - 120) && config.refreshToken != "") {
+            } else if (System.currentTimeMillis() > (config.tokenExpiry - 120) || force) {
                 // Token will expire in less than 2 mins, consider expired
                 // Need to get new access token as it has expired
-                log.d("Auth token has expired.  Requesting new token using refresh token")
+                if (force) {
+                    Timber.d("HA forcing new token using refresh token")
+                } else {
+                    Timber.d("Auth token has expired.  Requesting new token using refresh token")
+                }
                 val success: Boolean = reAuthWithRefreshToken()
                 if (success) {
-                    log.d("Authorising with new token")
+                    Timber.d("Authorising with new token")
                     callAuthJS(view)
                     setAuthStage(view, PageLoadingStage.AUTHORISED)
                 } else {
-                    log.d("Failed to refresh auth token.  Proceeding to login screen")
+                    Timber.d("Failed to refresh auth token.  Proceeding to login screen")
                     setAuthStage(view, PageLoadingStage.AUTH_FAILED)
                     loadUrl(view, getAuthUrl(getHAUrl(config, withDashboardPath = false)), clearCache = true)
                 }
             } else if (config.accessToken != "") {
-                log.d("Auth token is still valid - authorising")
+                Timber.d("Auth token is still valid - authorising")
                 setAuthStage(view, PageLoadingStage.AUTHORISED)
                 callAuthJS(view)
             }
         }
 
         override fun onRequestRevokeExternalAuth(view: WebView) {
-            log.d("External auth revoke callback in progress...")
+            Timber.d("External auth revoke callback in progress...")
             config.accessToken = ""
             config.refreshToken = ""
             config.tokenExpiry = 0
@@ -70,7 +83,7 @@ class AuthUtils(val config: APPConfig) {
         }
 
         private fun loadUrl(view: WebView, url: String, clearCache: Boolean = false) {
-            log.d("Loading URL: $url")
+            Timber.d("Loading URL: $url")
             Handler(Looper.getMainLooper()).post({
                 if (clearCache) {
                     view.clearCache(true)
@@ -92,7 +105,7 @@ class AuthUtils(val config: APPConfig) {
         }
 
         private fun reAuthWithRefreshToken(): Boolean {
-            log.d("Auth token has expired.  Requesting new token using refresh token")
+            Timber.d("Requesting new token using refresh token")
             val auth = refreshAccessToken(
                 getHAUrl(config),
                 config.refreshToken,
@@ -245,23 +258,22 @@ class AuthUtils(val config: APPConfig) {
                 "client_id" to getClientId(),
                 "refresh_token" to refreshToken
             )
-            log.d("URL: $url Refresh token: $refreshToken, client id: ${getClientId()}")
+            Timber.d("URL: $url Refresh token: ${refreshToken.substring(20)}..., client id: ${getClientId()}")
             val response = httpPOST(url, map, verifySSL)
             try {
                 val json = Json.parseToJsonElement(response).jsonObject
-                log.d("JSON response: $json")
                 
                 val accessToken = json["access_token"]?.jsonPrimitive?.content ?: ""
                 val tokenType = json["token_type"]?.jsonPrimitive?.content ?: ""
+                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
                 
                 if (accessToken.isEmpty() || tokenType.isEmpty()) {
-                    log.e("Token refresh failed: Required fields missing")
+                    Timber.e("Token refresh failed: access_token or token_type fields missing")
                     return AuthToken()
                 }
 
-                val expiresInSeconds = json["expires_in"]?.jsonPrimitive?.intOrNull
                 if (expiresInSeconds == null || expiresInSeconds <= 0) {
-                    log.e("Token refresh failed: invalid expires_in")
+                    Timber.e("Token refresh failed: invalid expires_in")
                     return AuthToken()
                 }
 
@@ -273,7 +285,7 @@ class AuthUtils(val config: APPConfig) {
                     expiresIn,
                 )
             } catch (e: Exception) {
-                log.e("Failed to parse refresh response: ${e.message}")
+                Timber.e("Failed to parse refresh response: ${e.message}")
                 return AuthToken()
             }
 

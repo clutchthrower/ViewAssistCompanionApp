@@ -8,9 +8,9 @@ import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.annotation.RequiresPermission
-import android.content.pm.PackageManager
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import kotlin.math.pow
 
 
 class Helpers {
@@ -59,5 +59,7 @@ class Helpers {
             var dotOccurred = 0
             return input.all { it in integerChars || it == '.' && dotOccurred++ < 1 }
         }
+
+        fun Float.round(decimals: Int = 2): Float  = (this * 10f.pow(decimals)).toInt() / 10f.pow(decimals)
     }
 }

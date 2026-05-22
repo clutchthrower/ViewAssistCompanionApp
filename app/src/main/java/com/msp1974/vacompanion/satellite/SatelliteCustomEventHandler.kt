@@ -121,14 +121,7 @@ class SatelliteCustomEventHandler(
                 )
             }
             "screenOn" -> {
-                val state = event.newValue as Boolean
-                satellite.sendStatus(
-                    buildJsonObject {
-                        putJsonObject("sensors", {
-                            put("screen_on", state)
-                        })
-                    }
-                )
+                satellite.sendSetting("screen_on", event.newValue as Boolean)
             }
             "enableMotionDetection" -> {
                 val state = event.newValue as Boolean
@@ -159,6 +152,15 @@ class SatelliteCustomEventHandler(
             }
             "motionDetectionSensitivity" -> {
                 satellite.motionTask.setSensitivity(event.newValue as Int)
+            }
+            "musicPlayerPlayingStatus" -> {
+                satellite.sendStatus(
+                    buildJsonObject {
+                        putJsonObject("media_player", {
+                            put("playing", event.newValue as Boolean)
+                        })
+                    }
+                )
             }
             else -> consumed = false
         }

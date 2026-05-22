@@ -102,6 +102,8 @@ class Permissions(val context: Context, val config: APPConfig) {
     fun isDeviceAdmin(): Boolean {
         val dpm: DevicePolicyManager = context.getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val mDeviceAdmin = ComponentName(context, VACADeviceAdminReceiver::class.java)
-        return dpm.isAdminActive(mDeviceAdmin)
+        val result = dpm.isAdminActive(mDeviceAdmin)
+        Timber.d("Device admin permission = $result")
+        return result
     }
 }

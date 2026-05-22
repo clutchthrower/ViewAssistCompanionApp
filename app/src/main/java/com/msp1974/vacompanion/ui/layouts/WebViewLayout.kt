@@ -1,8 +1,6 @@
 package com.msp1974.vacompanion.ui.layouts
 
 import android.view.ViewGroup
-import android.webkit.WebView
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +27,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.ui.VAViewModel
 import com.msp1974.vacompanion.ui.components.DiagnosticBar
+import com.msp1974.vacompanion.ui.components.IconStatusBlock
 import com.msp1974.vacompanion.utils.CustomWebView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -70,6 +69,14 @@ fun WebViewScreen (webView: CustomWebView, vaViewModel: VAViewModel = viewModel(
             DiagnosticBar(
                 vaUiState.diagnosticInfo,
                 modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
+
+        if (  !vaUiState.isNetworkConnected) {
+            IconStatusBlock(
+                message = "Wifi Disconnected",
+                icon = "nowifi",
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
     }

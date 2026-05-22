@@ -3,7 +3,14 @@
 import android.app.Application
 import android.content.res.Configuration
 import android.content.res.Resources
+import androidx.core.content.ContextCompat.getString
+import androidx.datastore.core.Closeable
+import androidx.lifecycle.application
+import androidx.lifecycle.viewModelScope
+import com.msp1974.vacompanion.R
 import com.msp1974.vacompanion.broadcasts.BroadcastSender
+import com.msp1974.vacompanion.data.NetworkStatus
+import com.msp1974.vacompanion.data.NetworkStatusManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.settings.PageLoadingStage
 import com.msp1974.vacompanion.utils.Event
@@ -11,11 +18,17 @@ import com.msp1974.vacompanion.utils.EventListener
 import com.msp1974.vacompanion.utils.Helpers
 import com.msp1974.vacompanion.utils.Permissions
 import com.msp1974.vacompanion.satellite.AudioRouteOption
+import com.msp1974.vacompanion.utils.Network
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -79,26 +92,37 @@ data class State(
     var permissions: PermissionsStatus = PermissionsStatus(),
     var updates: UpdateStatus = UpdateStatus(),
     var webViewPageLoadingStage: PageLoadingStage = PageLoadingStage.NOT_STARTED,
-    var showUUIDChangeDialog: Boolean = false
+    var showUUIDChangeDialog: Boolean = false,
+    var isNetworkConnected: Boolean = true
     )
 
 @HiltViewModel
 class VAViewModel @Inject constructor(
     application: Application,
-    val config: APPConfig
-): ViewModelBase(application), EventListener {
+    val config: APPConfig,
+    val networkStatusManager: NetworkStatusManager
+): ViewModelBase(application), EventListener, Closeable {
 
     private val _vacaState = MutableStateFlow(State())
     val vacaState: StateFlow<State> = _vacaState.asStateFlow()
 
     var resources: Resources = application.resources
     var permissions: Permissions = Permissions(application.applicationContext, config)
+    val network = Network(application.applicationContext)
+
+    val changedNetworkStatus = networkStatusManager.networkStatus
+        .dropWhile { it.status == NetworkStatus.Available }
+        .shareIn(viewModelScope, SharingStarted.Eagerly, 1)
 
     init {
         _vacaState.value = State()
+
+        network.setWifiLock()
+
         config.eventBroadcaster.addListener(this)
         initValues()
         buildAppInfo()
+        startNetworkMonitor()
     }
 
     fun initValues() {
@@ -113,6 +137,18 @@ class VAViewModel @Inject constructor(
                     muted = config.isMuted,
                 )
             )
+        }
+    }
+
+    override fun close() {
+        network.releaseWifiLock()
+    }
+
+    fun startNetworkMonitor() {
+        viewModelScope.launch(Dispatchers.Default) {
+            changedNetworkStatus.collect {
+                onNetworkStateChange(it.status)
+            }
         }
     }
 
@@ -274,7 +310,17 @@ class VAViewModel @Inject constructor(
         }
     }
 
-    fun onNetworkStateChange() {
+    fun onNetworkStateChange(status: NetworkStatus) {
+        Timber.d("Network status: $status")
+        _vacaState.update { currentState ->
+            currentState.copy(
+                isNetworkConnected = status == NetworkStatus.Available
+            )
+        }
+        when (status) {
+            NetworkStatus.Unavailable  -> setStatusMessage(application.getString(R.string.status_waiting_for_network))
+            NetworkStatus.Available -> setStatusMessage(getString(application.applicationContext, R.string.status_waiting_for_connection))
+        }
         buildAppInfo()
     }
 

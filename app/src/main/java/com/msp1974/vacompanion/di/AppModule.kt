@@ -1,6 +1,7 @@
 package com.msp1974.vacompanion.di
 
 import android.content.Context
+import com.msp1974.vacompanion.data.NetworkStatusManager
 import com.msp1974.vacompanion.settings.APPConfig
 import dagger.Module
 import dagger.Provides
@@ -18,5 +19,11 @@ object AppModule {
     @Singleton
     fun provideAPPConfig(@ApplicationContext context: Context): APPConfig {
         return APPConfig(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNetworkStatusManager(@ApplicationContext context: Context): NetworkStatusManager {
+        return NetworkStatusManager(context)
     }
 }

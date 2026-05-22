@@ -12,6 +12,7 @@ import com.google.android.gms.common.util.ClientLibraryUtils.getPackageInfo
 import com.msp1974.vacompanion.utils.Event
 import com.msp1974.vacompanion.utils.EventNotifier
 import com.msp1974.vacompanion.utils.FirebaseManager
+import com.msp1974.vacompanion.utils.Helpers.Companion.round
 import com.msp1974.vacompanion.utils.Logger
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -221,7 +222,7 @@ class APPConfig @Inject constructor(val context: Context) {
         onValueChangedListener(property, oldValue, newValue)
     }
 
-    var screenTimeout: Int by Delegates.observable(3000) { property, oldValue, newValue ->
+    var screenTimeout: Int by Delegates.observable(300000) { property, oldValue, newValue ->
         onValueChangedListener(property, oldValue, newValue)
     }
 
@@ -293,7 +294,7 @@ class APPConfig @Inject constructor(val context: Context) {
         settings["wake_word_engine"]?.jsonPrimitive?.contentOrNull?.let { wakeWordEngine = it }
         settings["wake_word"]?.jsonPrimitive?.contentOrNull?.let { wakeWord = it }
         settings["wake_word_sound"]?.jsonPrimitive?.contentOrNull?.let { wakeWordSound = it }
-        settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = it / 10 }
+        settings["wake_word_threshold"]?.jsonPrimitive?.floatOrNull?.let { wakeWordThreshold = (it / 10).round(2) }
         settings["raw_proximity_threshold"]?.jsonPrimitive?.intOrNull?.let { rawProximitySensorThreshold = it }
         settings["notification_volume"]?.jsonPrimitive?.floatOrNull?.let { notificationVolume = it.toInt() }
         settings["music_volume"]?.jsonPrimitive?.floatOrNull?.let { musicVolume = it.toInt() }

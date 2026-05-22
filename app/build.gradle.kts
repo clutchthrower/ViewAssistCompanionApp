@@ -31,8 +31,6 @@ android {
         code = versionProps["VERSION_CODE"].toString().toInt() + 1
         versionProps["VERSION_CODE"] = code.toString()
         versionProps.store(versionPropsFile.writer(), null)
-
-
     } else {
         throw GradleException("Could not read version.properties!")
     }
@@ -41,7 +39,7 @@ android {
         applicationId = "com.msp1974.vacompanion"
         minSdk = 26
         targetSdk = 36
-        versionName = "0.11.1"
+        versionName = "0.11.3"
         versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
