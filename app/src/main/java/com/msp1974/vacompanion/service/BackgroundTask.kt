@@ -1,8 +1,7 @@
 package com.msp1974.vacompanion.service
 
 import android.content.Context
-import android.net.wifi.WifiManager
-import com.msp1974.vacompanion.data.ConnectionStatusManager
+import com.msp1974.vacompanion.data.NetworkStatusManager
 import com.msp1974.vacompanion.settings.APPConfig
 import com.msp1974.vacompanion.wyoming.ServerState
 import com.msp1974.vacompanion.wyoming.WyomingTCPServer
@@ -13,7 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import timber.log.Timber
 
-internal class BackgroundTaskController (private val context: Context, val config: APPConfig, val connectionStatusManager: ConnectionStatusManager) {
+internal class BackgroundTaskController (private val context: Context, val config: APPConfig, val connectionStatusManager: NetworkStatusManager) {
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Default + job)
     private var server: WyomingTCPServer? = null

@@ -23,16 +23,16 @@ import timber.log.Timber
 import java.net.URL
 import androidx.core.net.toUri
 import androidx.lifecycle.viewModelScope
-import com.msp1974.vacompanion.data.ConnectionStatus
+import com.msp1974.vacompanion.data.NetworkStatus
 import kotlinx.coroutines.launch
 
 class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
     val log = Logger()
     val config = viewModel.config
-    val connectionStatusManager = viewModel.connectionStatusManager
+    val networkStatusManager = viewModel.networkStatusManager
     private val firebase = FirebaseManager.getInstance(config.context)
     private val resources = viewModel.resources
-    private var connectionStatus = ConnectionStatus.CONNECTED
+    private var networkStatus = NetworkStatus.Available
 
     companion object {
 
@@ -43,8 +43,8 @@ class CustomWebViewClient(val viewModel: VAViewModel): WebViewClientCompat()  {
 
     init {
         viewModel.viewModelScope.launch {
-            connectionStatusManager.networkStatus.collect {
-                connectionStatus = it.status
+            networkStatusManager.networkStatus.collect {
+                networkStatus = it.status
             }
         }
     }
