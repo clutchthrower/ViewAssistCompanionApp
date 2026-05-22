@@ -238,6 +238,7 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
                 if (config.screenTimeout < 15000) config.screenTimeout = 15000
                 screen.setScreenTimeout(config.screenTimeout)
                 screenSaver(false)
+                screenWake()
             }
         } else if (viewModel.vacaState.value.satelliteRunning) {
             screen.setScreenBrightness(window, config.screenBrightness)
@@ -610,9 +611,10 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun screenOn(active: Boolean) {
-        if (active && screen.isScreenOff()) {
+        Timber.d("Screen status: isOff: ${screen.isScreenOff()}, isOn: ${screen.isScreenOn()}")
+        if (active) {
             screenWake()
-        } else if (!active && screen.isScreenOn()) {
+        } else {
             screenSleep()
         }
     }
