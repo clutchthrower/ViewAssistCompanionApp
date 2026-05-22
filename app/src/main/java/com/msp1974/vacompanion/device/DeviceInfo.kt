@@ -190,9 +190,16 @@ class DeviceCapabilitiesManager(val context: Context, val config: APPConfig) {
                 "maxNotificationVolume",
                 audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
             )
-            put("hasAGC", AutomaticGainControl.isAvailable())
-            put("hasNS", NoiseSuppressor.isAvailable())
-            put("hasAEC", AcousticEchoCanceler.isAvailable())
+            // Catch if issue with audio enhancements
+            if (UnsupportedFunctionsDevice.isIssueDevice(FunctionClasses.AUDIO_ENHANCEMENTS)) {
+                put("hasAGC", false)
+                put("hasNS", false)
+                put("hasAEC", false)
+            } else {
+                put("hasAGC", AutomaticGainControl.isAvailable())
+                put("hasNS", NoiseSuppressor.isAvailable())
+                put("hasAEC", AcousticEchoCanceler.isAvailable())
+            }
         }
     }
 

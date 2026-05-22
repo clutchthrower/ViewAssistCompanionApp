@@ -6,6 +6,8 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import androidx.annotation.RequiresPermission
+import com.msp1974.vacompanion.device.FunctionClasses
+import com.msp1974.vacompanion.device.UnsupportedFunctionsDevice
 import com.msp1974.vacompanion.settings.APPConfig
 import timber.log.Timber
 import java.nio.ByteBuffer
@@ -99,6 +101,10 @@ class MicrophoneInput (
 
     private fun setupAudioEffects() {
         val sessionId = audioRecord?.audioSessionId ?: return
+
+        // Catch if issue with audio enhancements and do not load them
+        if (UnsupportedFunctionsDevice.isIssueDevice(FunctionClasses.AUDIO_ENHANCEMENTS)) return
+
         try {
             if (AutomaticGainControl.isAvailable()) {
                 agc = AutomaticGainControl.create(sessionId)
