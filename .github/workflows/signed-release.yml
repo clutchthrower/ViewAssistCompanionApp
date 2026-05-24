@@ -15,6 +15,8 @@ on:
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -25,7 +27,8 @@ jobs:
       - name: Calculate new version
         id: calc_version
         run: |
-          CURRENT_VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)"/\1/')
+          # Use 'versionName = "' to avoid matching the println() line in the Gradle task
+          CURRENT_VERSION=$(grep 'versionName = "' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)"/\1/' | tr -d '[:space:]')
           echo "Current version: $CURRENT_VERSION"
 
           IFS='.' read -r -a version_parts <<< "$CURRENT_VERSION"
@@ -52,24 +55,27 @@ jobs:
       - name: Increment version code
         id: inc_version_code
         run: |
-          CURRENT_VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed 's/.*versionCode = \([0-9]*\)/\1/')
+          # versionCode is dynamic in build.gradle.kts — read the source of truth from version.properties
+          CURRENT_VERSION_CODE=$(grep 'VERSION_CODE' version.properties | cut -d'=' -f2 | tr -d '[:space:]')
           NEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
           echo "version_code=$NEW_VERSION_CODE" >> $GITHUB_OUTPUT
           echo "Previous version code: $CURRENT_VERSION_CODE"
           echo "New version code: $NEW_VERSION_CODE"
 
-      - name: Update build.gradle.kts with new version
+      - name: Update version files
         run: |
-          sed -i "s/versionCode = [0-9]*/versionCode = ${{ steps.inc_version_code.outputs.version_code }}/" app/build.gradle.kts
           sed -i "s/versionName = \".*\"/versionName = \"${{ steps.calc_version.outputs.new_version }}\"/" app/build.gradle.kts
+          sed -i "s/VERSION_CODE=.*/VERSION_CODE=${{ steps.inc_version_code.outputs.version_code }}/" version.properties
           echo "Updated build.gradle.kts:"
-          cat app/build.gradle.kts | grep -A 2 "versionCode"
+          grep 'versionName' app/build.gradle.kts
+          echo "Updated version.properties:"
+          cat version.properties
 
       - name: Commit version bump and create tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle.kts
+          git add app/build.gradle.kts version.properties
           git commit -m "chore: bump version to ${{ steps.calc_version.outputs.new_version }} (versionCode ${{ steps.inc_version_code.outputs.version_code }})"
           git tag -a ${{ steps.calc_version.outputs.tag }} -m "Release ${{ steps.calc_version.outputs.tag }}"
           git push origin main
@@ -89,12 +95,27 @@ jobs:
       - name: Create Google Services JSON File
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: echo $GOOGLE_SERVICES_JSON > ./app/google-services.json
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > ./app/google-services.json
 
       - name: Decode Keystore
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
-        run: echo $KEYSTORE_FILE | base64 -di > ./app/release.keystore
+        run: printf '%s' "$KEYSTORE_FILE" | base64 --decode > ./app/release.keystore
+
+      - name: Convert keystore to legacy PKCS12
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          keytool -importkeystore \
+            -srckeystore ./app/release.keystore \
+            -destkeystore ./app/release-legacy.keystore \
+            -deststoretype PKCS12 \
+            -srcstorepass "$KEYSTORE_PASSWORD" \
+            -deststorepass "$KEYSTORE_PASSWORD" \
+            -J-Dkeystore.pkcs12.legacy \
+            -noprompt
+          mv ./app/release-legacy.keystore ./app/release.keystore
 
       - name: Build Signed Release APK and AAB
         env:
@@ -117,13 +138,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to Google Play
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: codes.andrew.vacompanion
-          releaseFiles: app/build/outputs/bundle/release/*.aab
-          track: internal
-          releaseName: ${{ steps.calc_version.outputs.tag }}
-          status: completed
-          inAppUpdatePriority: 2
+#      - name: Publish to Google Play
+#        uses: r0adkll/upload-google-play@v1
+#        with:
+#          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+#          packageName: codes.andrew.vacompanion
+#          releaseFiles: app/build/outputs/bundle/release/*.aab
+#          track: internal
+#          releaseName: ${{ steps.calc_version.outputs.tag }}
+#          status: completed
+#          inAppUpdatePriority: 2
