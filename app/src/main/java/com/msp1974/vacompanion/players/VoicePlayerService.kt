@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Intent
 import android.media.AudioAttributes
-import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
@@ -18,7 +17,7 @@ class VoicePlayerService() : Service() {
 
     private lateinit var audioManager: AudioManager
     private var mediaPlayer: AudioTrack? = null
-    private var focusRequest: AudioFocusRequest? = null
+    private var focusChangeListener: AudioManager.OnAudioFocusChangeListener? = null
     var hasAudioFocus = false
 
     var isReady = false
@@ -124,46 +123,32 @@ class VoicePlayerService() : Service() {
         }
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
     fun requestAudioFocus(): Boolean {
-        @SuppressLint("UnsafeOptInUsageError")
-        focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(audioAttributes)
-            .setAcceptsDelayedFocusGain(true)
-            .setWillPauseWhenDucked(false)
-            .setOnAudioFocusChangeListener { focusChange ->
-                Timber.d("Voice onAudioFocusChanged: $focusChange")
-                when (focusChange) {
-                    AudioManager.AUDIOFOCUS_GAIN -> {
-                        hasAudioFocus = true
-                    }
-
-                    AudioManager.AUDIOFOCUS_LOSS -> {
-                        hasAudioFocus = false
-                        stop(true)
-                    }
-
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                        hasAudioFocus = false
-                    }
-
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                        mediaPlayer?.setVolume(0.2f)
-                    }
-                }
+        focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            Timber.d("Voice onAudioFocusChanged: $focusChange")
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_GAIN -> hasAudioFocus = true
+                AudioManager.AUDIOFOCUS_LOSS -> { hasAudioFocus = false; stop(true) }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> hasAudioFocus = false
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> mediaPlayer?.setVolume(0.2f)
             }
-            .build();
-
-        val result = audioManager.requestAudioFocus(focusRequest!!)
-
+        }
+        @Suppress("DEPRECATION")
+        val result = audioManager.requestAudioFocus(
+            focusChangeListener,
+            AudioManager.STREAM_MUSIC,
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        )
         hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Timber.d("Voice requestAudioFocus: $result")
         return hasAudioFocus
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
     fun abandonAudioFocus() {
-        if (hasAudioFocus) audioManager.abandonAudioFocusRequest(focusRequest!!)
+        if (hasAudioFocus) {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(focusChangeListener)
+        }
         hasAudioFocus = false
         Timber.d("Voice abandonAudioFocus")
     }
