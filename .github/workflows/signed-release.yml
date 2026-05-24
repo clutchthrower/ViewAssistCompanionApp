@@ -102,6 +102,21 @@ jobs:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
         run: printf '%s' "$KEYSTORE_FILE" | base64 --decode > ./app/release.keystore
 
+      - name: Convert keystore to legacy PKCS12
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          keytool -importkeystore \
+            -srckeystore ./app/release.keystore \
+            -destkeystore ./app/release-legacy.keystore \
+            -deststoretype PKCS12 \
+            -srcstorepass "$KEYSTORE_PASSWORD" \
+            -deststorepass "$KEYSTORE_PASSWORD" \
+            -J-Dkeystore.pkcs12.legacy \
+            -noprompt
+          mv ./app/release-legacy.keystore ./app/release.keystore
+
       - name: Build Signed Release APK and AAB
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/app/release.keystore
