@@ -27,3 +27,10 @@
 -dontwarn org.conscrypt.OpenSSLProvider
 
 -keep class ai.onnxruntime.** { *; }
+
+# WorkManager uses Class.forName() to instantiate its Room database by canonical name.
+# R8 renames the class, breaking instantiation at runtime — keep the name intact.
+-keep class androidx.work.impl.WorkDatabase
+-keep class * extends androidx.work.impl.WorkDatabase { *; }
+-keep class * extends androidx.room.RoomDatabase { *; }
+-keepnames class * extends androidx.room.RoomDatabase
