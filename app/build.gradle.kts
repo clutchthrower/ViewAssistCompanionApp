@@ -39,7 +39,7 @@ android {
         applicationId = "com.msp1974.vacompanion"
         minSdk = 25
         targetSdk = 36
-        versionName = "0.11.9"
+        versionName = "0.11.10"
         versionCode = code
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
