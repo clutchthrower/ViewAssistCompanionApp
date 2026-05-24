@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.os.Build
 import com.msp1974.vacompanion.utils.ActivityManager
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
@@ -30,16 +31,17 @@ class VACAApplication: Application() {
         activityManager = ActivityManager(this)
         Timber.plant(DebugTree())
 
-        // Create the notification channel (required for Android 8.0 and above)
-        val channel = NotificationChannel(
-            "VACAForegroundServiceChannelId",
-            "VACA Foreground Service Channel",
-            NotificationManager.IMPORTANCE_LOW
-        )
-        // service provided by Android Operating system to show notification outside of our app
-        val notificationManager =
-            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(channel)
+        // NotificationChannel is required for Android 8.0+ (API 26+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "VACAForegroundServiceChannelId",
+                "VACA Foreground Service Channel",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val notificationManager =
+                getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
 
     }
 
