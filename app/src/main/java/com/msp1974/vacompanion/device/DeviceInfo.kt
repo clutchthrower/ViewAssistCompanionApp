@@ -107,11 +107,11 @@ class DeviceCapabilitiesManager(val context: Context, val config: APPConfig) {
     }
 
     fun getWebViewVersion(): String {
-        try {
-            val info = WebView.getCurrentWebViewPackage()
-            return info!!.versionName!!
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return "unknown"
+        return try {
+            WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
         } catch (e: Exception) {
-            return "unknown"
+            "unknown"
         }
     }
 
