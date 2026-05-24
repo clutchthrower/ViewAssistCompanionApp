@@ -1,6 +1,7 @@
 package com.msp1974.vacompanion.utils
 
 import android.annotation.SuppressLint
+import android.os.Build
 import kotlin.jvm.JvmOverloads
 import android.content.Context
 import android.content.res.Configuration
@@ -50,7 +51,9 @@ class CustomWebView @JvmOverloads constructor(
         setFocusable(true)
         setFocusableInTouchMode(true)
 
-        setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT, false)
+        }
         setLayerType(LAYER_TYPE_HARDWARE, null)
 
         settings.apply {
@@ -60,7 +63,7 @@ class CustomWebView @JvmOverloads constructor(
             allowFileAccess = true
             allowContentAccess = true
             mediaPlaybackRequiresUserGesture = false
-            safeBrowsingEnabled = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) safeBrowsingEnabled = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             textZoom = 100
             useWideViewPort = true
