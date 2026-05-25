@@ -39,9 +39,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import timber.log.Timber
-import java.time.Instant
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
@@ -657,7 +658,9 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
     }
 
     companion object {
-        fun isoNow(): String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
+        fun isoNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            .also { it.timeZone = TimeZone.getTimeZone("UTC") }
+            .format(Date())
     }
 
 }

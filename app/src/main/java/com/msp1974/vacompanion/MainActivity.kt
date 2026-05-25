@@ -75,8 +75,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
-import java.time.Instant
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
 import kotlin.getValue
 
@@ -576,7 +578,9 @@ class MainActivity : AppCompatActivity(), EventListener, ComponentCallbacks2 {
     }
 
     fun onMotion() {
-        config.lastMotion = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
+        config.lastMotion = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            .also { it.timeZone = TimeZone.getTimeZone("UTC") }
+            .format(Date())
         if (config.screenOnMotion) screenWake()
     }
 
