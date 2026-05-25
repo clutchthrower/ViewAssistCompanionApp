@@ -347,17 +347,23 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
 
     suspend fun playWakeWordDetectionSound() {
         if (config.wakeWordSound != "none") {
+            val resId = context.resources.getIdentifier(
+                config.wakeWordSound,
+                "raw",
+                context.packageName
+            )
+            if (resId == 0) {
+                Timber.w("Wake word sound resource not found: ${config.wakeWordSound}")
+                audioPipeline?.silenceAudioBefore = 1L
+                return
+            }
             try {
-                mediaManager.soundPlayer.play(
-                    context.resources.getIdentifier(
-                        config.wakeWordSound,
-                        "raw",
-                        context.packageName
-                    )
-                )
+                mediaManager.soundPlayer.play(resId)
                 Timber.i("Started wake word sound")
                 scope.launch {
-                    while(mediaManager.soundPlayer.state.value != Player.STATE_ENDED) {
+                    val deadline = System.currentTimeMillis() + 5000L
+                    while (mediaManager.soundPlayer.state.value != Player.STATE_ENDED) {
+                        if (System.currentTimeMillis() > deadline) break
                         delay(50)
                     }
                     audioPipeline?.silenceAudioBefore = System.currentTimeMillis()
@@ -365,6 +371,7 @@ abstract class Satellite(var context: Context, val config: APPConfig, val scope:
                 }
             } catch (e: Exception) {
                 Timber.e("Error playing wake word sound: ${e.message.toString()}")
+                audioPipeline?.silenceAudioBefore = 1L
             }
         } else {
             audioPipeline?.silenceAudioBefore = 1L
