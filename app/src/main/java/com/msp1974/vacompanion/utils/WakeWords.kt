@@ -4,10 +4,7 @@ import android.content.Context
 import android.os.Environment
 import com.msp1974.vacompanion.wakeword.WakeWord
 import timber.log.Timber
-import kotlin.io.path.Path
-import kotlin.io.path.absolutePathString
-import kotlin.io.path.forEachDirectoryEntry
-import kotlin.io.path.isDirectory
+import java.io.File
 
 
 class WakeWords(val context: Context, val ext: String) {
@@ -23,29 +20,27 @@ class WakeWords(val context: Context, val ext: String) {
     fun getCustomWakeWords(path: String): Map<String, WakeWord> {
         val customWakeWords = mutableMapOf<String, WakeWord>()
         val downloadPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val vacaDownloadDir = Path(downloadPath.toString(), path)
-        val vacaFilesDir = Path(context.filesDir.toString(), path)
+        val vacaDownloadDir = File(downloadPath, path)
+        val vacaFilesDir = File(context.filesDir, path)
 
-        if (vacaDownloadDir.isDirectory()) {
-            Timber.d("Custom wake words directory found in Downloads - ${vacaDownloadDir.toFile().absolutePath}")
-            vacaDownloadDir.forEachDirectoryEntry( "*.$ext", { entry ->
-                Timber.d("Found custom wake word: ${entry.fileName}")
-                val key = entry.fileName.toString().replace(".$ext", "").lowercase()
+        if (vacaDownloadDir.isDirectory) {
+            Timber.d("Custom wake words directory found in Downloads - ${vacaDownloadDir.absolutePath}")
+            vacaDownloadDir.listFiles { f -> f.name.endsWith(".$ext") }?.forEach { entry ->
+                Timber.d("Found custom wake word: ${entry.name}")
+                val key = entry.name.replace(".$ext", "").lowercase()
                 val name = key.replace("_", " ")
-
-                customWakeWords[key] = WakeWord(name.capitalizeWords(), entry.absolutePathString(), false)
-            })
+                customWakeWords[key] = WakeWord(name.capitalizeWords(), entry.absolutePath, false)
+            }
         }
 
-        if (vacaFilesDir.isDirectory()) {
-            Timber.d("Custom wake words directory found in App files - ${vacaFilesDir.toFile().absolutePath}")
-            vacaFilesDir.forEachDirectoryEntry( "*.$ext", { entry ->
-                Timber.d("Found custom wake word: ${entry.fileName}")
-                val key = entry.fileName.toString().replace(".$ext", "").lowercase()
+        if (vacaFilesDir.isDirectory) {
+            Timber.d("Custom wake words directory found in App files - ${vacaFilesDir.absolutePath}")
+            vacaFilesDir.listFiles { f -> f.name.endsWith(".$ext") }?.forEach { entry ->
+                Timber.d("Found custom wake word: ${entry.name}")
+                val key = entry.name.replace(".$ext", "").lowercase()
                 val name = key.replace("_", " ")
-
-                customWakeWords[key] = WakeWord(name.capitalizeWords(), entry.absolutePathString(), false)
-            })
+                customWakeWords[key] = WakeWord(name.capitalizeWords(), entry.absolutePath, false)
+            }
         }
         return customWakeWords
     }

@@ -3,10 +3,10 @@ package com.msp1974.vacompanion.wakeword.openwakeword.ml
 import android.content.res.AssetManager
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
 import org.tensorflow.lite.Interpreter
+import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.io.path.Path
 
 /**
  * Handles LiteRT (TFLite) model loading and inference for wake word detection.
@@ -41,7 +41,7 @@ internal class TfliteModelRunner(
                 inputStream.readBytes()
             }
         } else {
-            val file = Path(model.modelPath).toFile()
+            val file = File(model.modelPath)
             file.readBytes()
         }
     }
