@@ -16,9 +16,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URL
-import kotlin.io.path.Path
-import kotlin.io.path.createDirectories
-import kotlin.io.path.exists
 
 enum class WakeWordType {
     OPENWAKEWORD,
@@ -73,17 +70,17 @@ class WakeWordDownloader(private val context: Context, val config: APPConfig) {
      * Downloads a single file and emits its status.
      */
     private fun downloadFile(type: String, url: String, fileName: String): Flow<DownloadStatus> = flow {
-        val targetDir = Path(context.filesDir.absolutePath, CUSTOM_DIR, WAKEWORDS_DIR, type)
+        val targetDir = File(context.filesDir, "$CUSTOM_DIR/$WAKEWORDS_DIR/$type")
         if (!targetDir.exists()) {
             try {
-                targetDir.createDirectories()
+                targetDir.mkdirs()
             } catch (e: Exception) {
                 emit(DownloadStatus.Error(fileName, "Failed to create directory: $targetDir"))
                 return@flow
             }
         }
 
-        val targetFile = File(targetDir.toString(), fileName)
+        val targetFile = File(targetDir, fileName)
         val request = Request.Builder().url(url).build()
 
         try {

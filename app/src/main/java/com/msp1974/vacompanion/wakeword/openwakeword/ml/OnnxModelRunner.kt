@@ -5,8 +5,8 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.res.AssetManager
 import com.msp1974.vacompanion.wakeword.openwakeword.model.WakeWordModel
+import java.io.File
 import java.io.IOException
-import kotlin.io.path.Path
 
 /**
  * Handles ONNX model loading and inference for wake word detection.
@@ -37,7 +37,7 @@ internal class OnnxModelRunner(
                 return inputStream.readBytes()
             }
         } else {
-            val file = Path(model.modelPath).toFile()
+            val file = File(model.modelPath)
             return file.readBytes()
         }
     }
